@@ -10,6 +10,8 @@ estado: implementado
 
 [[Bienvenido|← Volver al inicio]]
 
+Documento relacionado: [[Registro de usuarios y estadísticas|Persistencia, métricas y privacidad]].
+
 ## Estructura web
 
 ```text
@@ -91,7 +93,7 @@ Las situaciones y sus formularios se definen en `js/app.js` mediante un arreglo 
 - **Base principal:** PostgreSQL mediante `DATABASE_URL`.
 - **PostgreSQL local:** `docker compose up -d db`.
 - **Migraciones:** `npm run db:migrate`.
-- **Doble clic en macOS:** `dev.command` migra, inicia FastAPI y abre el navegador.
+- **Doble clic en macOS:** en el primer arranque, `dev.command` crea `.venv`, instala dependencias, genera `.env` y configura la contraseña administrativa. Luego abre Docker Desktop si es necesario, inicia PostgreSQL con Docker Compose, espera la conexión, aplica migraciones, inicia FastAPI y abre el navegador.
 - **Terminal:** `npm run dev` inicia FastAPI en el puerto 4173.
 - **Panel:** `/admin`, protegido por una contraseña Argon2 configurada en el entorno.
 - **Pruebas:** `npm test`; la suite usa una base SQLite aislada y no modifica PostgreSQL.

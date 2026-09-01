@@ -27,13 +27,13 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 ```
 
-2. Inicia PostgreSQL. El entorno de desarrollo incluido usa PostgreSQL 18:
+2. Inicia PostgreSQL. El entorno de desarrollo incluido usa PostgreSQL 18 y monta el volumen en `/var/lib/postgresql`, como requiere esta versión:
 
 ```bash
 docker compose up -d db
 ```
 
-También puedes usar una instalación PostgreSQL existente y cambiar `DATABASE_URL`.
+Si tu instalación usa el ejecutable clásico, ejecuta `docker-compose up -d db`. También puedes usar una instalación PostgreSQL existente y cambiar `DATABASE_URL`.
 
 3. Crea la configuración local y genera el hash de la contraseña administrativa:
 
@@ -42,7 +42,7 @@ cp .env.example .env
 .venv/bin/python -m backend.security hash-password
 ```
 
-Copia el hash resultante en `ADMIN_PASSWORD_HASH` y cambia `SECRET_KEY` dentro de `.env`.
+Copia el hash resultante entre comillas simples en `ADMIN_PASSWORD_HASH` y cambia `SECRET_KEY` dentro de `.env`. Las comillas evitan que la terminal interprete los signos `$` del hash Argon2.
 
 4. Aplica la migración inicial:
 
@@ -52,7 +52,9 @@ npm run db:migrate
 
 ### Inicio diario
 
-En macOS, haz doble clic en `dev.command`. El launcher aplica migraciones, inicia FastAPI y abre el navegador. Desde terminal:
+En macOS, haz doble clic en `dev.command`. La primera ejecución crea `.venv`, instala las dependencias, genera `.env` y solicita una contraseña para el panel administrativo. Si se usa la `DATABASE_URL` local incluida, también abre Docker Desktop cuando sea necesario, inicia PostgreSQL con Docker Compose y espera a que esté disponible. Después aplica las migraciones, inicia FastAPI y abre el navegador.
+
+Las ejecuciones posteriores reutilizan la preparación existente. Desde terminal también puedes iniciar el servidor con:
 
 ```bash
 npm run dev
@@ -133,3 +135,9 @@ npm run check
 ```
 
 La suite usa SQLite aislado para poder ejecutarse sin modificar la base PostgreSQL de desarrollo.
+
+Para repetir la misma suite sobre PostgreSQL, crea una base desechable cuyo nombre contenga `test` y ejecuta:
+
+```bash
+TEST_DATABASE_URL=postgresql+psycopg://usuario:clave@localhost/tadeo_test npm test
+```

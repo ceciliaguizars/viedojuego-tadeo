@@ -78,3 +78,7 @@ Fuera de alcance: movimiento libre, mapas interactivos, combates, puntos, cuenta
 
 > ¡Todas las actividades están completas!  
 > Tadeo terminó todo lo que tenía pendiente para hoy. Después de cenar con su familia, guarda su agenda y se prepara para dormir.
+
+## Registro de la aplicación
+
+La implementación utiliza folios anónimos y PostgreSQL para conservar respuestas, intentos, progreso y tiempos. Las definiciones de las métricas, medidas de privacidad y operación del panel se documentan en [[03 Diseño/Registro de usuarios y estadísticas|Registro de usuarios y estadísticas]].

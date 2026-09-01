@@ -28,6 +28,7 @@ La versión web implementa el recorrido completo en **21 etapas de preguntas**, 
 
 - [[01 Proyecto/Brief del proyecto|Brief del proyecto]]
 - [[03 Diseño/Scaffold técnico|Scaffold técnico de la plataforma]]
+- [[03 Diseño/Registro de usuarios y estadísticas|Registro de usuarios y estadísticas]]
 
 ## Progresión matemática
 

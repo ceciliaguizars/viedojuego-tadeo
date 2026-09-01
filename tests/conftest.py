@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import os
 
-os.environ["DATABASE_URL"] = "sqlite+pysqlite:///:memory:"
+from sqlalchemy.engine import make_url
+
+
+test_database_url = os.getenv("TEST_DATABASE_URL", "sqlite+pysqlite:///:memory:")
+parsed_test_url = make_url(test_database_url)
+if not test_database_url.startswith("sqlite") and "test" not in (parsed_test_url.database or "").lower():
+    raise RuntimeError("TEST_DATABASE_URL debe apuntar a una base cuyo nombre contenga 'test'.")
+os.environ["DATABASE_URL"] = test_database_url
 os.environ["SECRET_KEY"] = "test-secret-key-that-is-not-for-production"
 
 import pytest
@@ -37,4 +44,3 @@ def participant_code() -> str:
         database.add(code)
         database.commit()
     return "TEST2345"
-
