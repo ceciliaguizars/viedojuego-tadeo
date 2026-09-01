@@ -1,77 +1,157 @@
 {% extends "base.html" %}
 {% block title %}{{ application.name }}{% endblock %}
 {% block content %}
-  <div class="page-heading">
-    <div><a class="back" href="/admin">← Aplicaciones</a><p class="kicker">Aplicación {{ application.id }}</p><h1>{{ application.name }}</h1></div>
-    <div class="button-row">
-      <a class="button" href="/admin/applications/{{ application.id }}/exports/sessions.csv">Resumen CSV</a>
-      <a class="button" href="/admin/applications/{{ application.id }}/exports/attempts.csv">Intentos CSV</a>
+  <nav class="breadcrumbs" aria-label="Migas de pan">
+    <a href="/admin">Mis grupos</a><span aria-hidden="true">/</span><span aria-current="page">{{ application.name }}</span>
+  </nav>
+
+  <div class="page-heading group-heading">
+    <div>
+      <p class="kicker">Grupo activo</p>
+      <h1>{{ application.name }}</h1>
+      <p class="page-lead">Entrega los folios y consulta los resultados conforme avanza la actividad.</p>
+    </div>
+    <div class="button-row export-actions">
+      <button class="button" type="button" data-print-codes>Imprimir folios</button>
+      <a class="button" href="/admin/applications/{{ application.id }}/exports/codes.csv">Descargar folios</a>
+      <details class="export-menu">
+        <summary class="button">Exportar resultados</summary>
+        <div>
+          <a href="/admin/applications/{{ application.id }}/exports/sessions.csv">Resumen por sesión</a>
+          <a href="/admin/applications/{{ application.id }}/exports/attempts.csv">Historial de intentos</a>
+        </div>
+      </details>
     </div>
   </div>
 
-  <section class="stat-grid">
-    <article class="stat panel"><span>Participantes</span><strong>{{ summary.participants }}</strong><small>{{ summary.sessions }} sesiones</small></article>
-    <article class="stat panel"><span>Finalización</span><strong>{{ summary.completion_rate if summary.completion_rate is not none else '—' }}{% if summary.completion_rate is not none %}%{% endif %}</strong><small>sesiones principales</small></article>
-    <article class="stat panel"><span>Correctas al primer intento</span><strong>{{ summary.mean_first_try_accuracy if summary.mean_first_try_accuracy is not none else '—' }}{% if summary.mean_first_try_accuracy is not none %}%{% endif %}</strong><small>promedio principal</small></article>
-    <article class="stat panel"><span>Exactitud global</span><strong>{{ summary.mean_global_accuracy if summary.mean_global_accuracy is not none else '—' }}{% if summary.mean_global_accuracy is not none %}%{% endif %}</strong><small>promedio principal</small></article>
-    <article class="stat panel"><span>Tiempo activo medio</span><strong>{{ summary.mean_active_seconds|duration }}</strong><small>solo completadas</small></article>
-    <article class="stat panel"><span>Duración mediana</span><strong>{{ summary.median_elapsed_seconds|duration }}</strong><small>solo completadas</small></article>
+  <nav class="section-nav" aria-label="Secciones del grupo">
+    <a href="#resumen">Resumen</a>
+    <a href="#codigos">Folios <span>{{ codes|length }}</span></a>
+    <a href="#resultados">Resultados <span>{{ session_rows|length }}</span></a>
+    <a href="#dificultad">Dificultad</a>
+  </nav>
+
+  <section id="resumen" aria-labelledby="summary-title">
+    <div class="section-title-row">
+      <div><p class="kicker">Vista rápida</p><h2 id="summary-title">Resumen del grupo</h2></div>
+      <p>Los promedios consideran las sesiones principales.</p>
+    </div>
+    <div class="stat-grid">
+      <article class="stat panel"><span>Participantes</span><strong>{{ summary.participants }}</strong><small>{{ summary.sessions }} sesiones totales</small></article>
+      <article class="stat panel"><span>Finalización</span><strong>{{ summary.completion_rate if summary.completion_rate is not none else '—' }}{% if summary.completion_rate is not none %}%{% endif %}</strong><small>sesiones principales</small></article>
+      <article class="stat panel"><span>Correctas al primer intento</span><strong>{{ summary.mean_first_try_accuracy if summary.mean_first_try_accuracy is not none else '—' }}{% if summary.mean_first_try_accuracy is not none %}%{% endif %}</strong><small>promedio del grupo</small></article>
+      <article class="stat panel"><span>Exactitud global</span><strong>{{ summary.mean_global_accuracy if summary.mean_global_accuracy is not none else '—' }}{% if summary.mean_global_accuracy is not none %}%{% endif %}</strong><small>todos los envíos</small></article>
+      <article class="stat panel"><span>Tiempo activo medio</span><strong>{{ summary.mean_active_seconds|duration }}</strong><small>sesiones completadas</small></article>
+      <article class="stat panel"><span>Duración mediana</span><strong>{{ summary.median_elapsed_seconds|duration }}</strong><small>sesiones completadas</small></article>
+    </div>
   </section>
 
-  <div class="two-column">
-    <section class="panel">
-      <h2>Folios anónimos</h2>
-      <form action="/admin/applications/{{ application.id }}/codes" method="post" class="inline-form">
-        <input type="hidden" name="csrf" value="{{ csrf_token }}" />
-        <label>Cantidad<input type="number" name="count" value="20" min="1" max="500" required /></label>
-        <button class="primary" type="submit">Generar folios</button>
-      </form>
-      <div class="code-list" aria-label="Folios generados">
-        {% for code in codes %}<span class="code {{ 'used' if code.first_used_at else '' }}">{{ code.code }}</span>{% else %}<p class="muted">Todavía no hay folios.</p>{% endfor %}
+  <section class="panel code-manager" id="codigos" aria-labelledby="codes-title">
+    <div class="section-heading">
+      <div><span class="step-number">2</span><div><p class="kicker">Segundo paso</p><h2 id="codes-title">Generar y entregar folios</h2></div></div>
+      <p>Cada estudiante usa un folio de ocho caracteres para entrar al juego.</p>
+    </div>
+
+    {% if request.query_params.get('generated') %}
+      <div class="notice success" role="status">
+        Se generaron {{ request.query_params.get('generated') }} folios nuevos. Ya puedes copiarlos, imprimirlos o descargarlos.
       </div>
-      <p class="legend"><span class="sample used"></span> utilizado <span class="sample"></span> disponible</p>
-    </section>
+    {% endif %}
 
-    <section class="panel">
-      <h2>Dificultad por reto</h2>
-      <div class="table-wrap"><table>
-      <thead><tr><th>Situación</th><th>Sesiones</th><th>Preguntas</th><th>Intentos</th><th>1er intento</th><th>Global</th></tr></thead>
-        <tbody>{% for row in difficulty %}<tr>
-          <td>{{ row.scene_number }}</td><td>{{ row.sessions_attempted }}</td><td>{{ row.questions_attempted }}</td><td>{{ row.attempts }}</td>
-          <td>{{ row.first_try_accuracy if row.first_try_accuracy is not none else '—' }}{% if row.first_try_accuracy is not none %}%{% endif %}</td>
-          <td>{{ row.global_accuracy if row.global_accuracy is not none else '—' }}{% if row.global_accuracy is not none %}%{% endif %}</td>
-        </tr>{% endfor %}</tbody>
-      </table></div>
-    </section>
-  </div>
+    <form action="/admin/applications/{{ application.id }}/codes" method="post" class="code-form">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+      <label for="code-count">Cantidad de folios</label>
+      <div class="code-form-controls">
+        <input id="code-count" type="number" name="count" value="20" min="1" max="500" required />
+        <button class="primary" type="submit">Generar folios</button>
+      </div>
+      <small>El máximo por operación es 500. Los folios ya creados no se modifican.</small>
+    </form>
 
-  <section class="panel">
-    <h2>Resultados individuales</h2>
+    <div class="code-toolbar">
+      <div class="code-counts" aria-label="Estado de los folios">
+        <span><strong>{{ available_codes|length }}</strong> disponibles</span>
+        <span><strong>{{ used_codes|length }}</strong> utilizados</span>
+      </div>
+      {% if available_codes %}
+        <button class="button compact" type="button" data-copy-codes>Copiar disponibles</button>
+      {% endif %}
+    </div>
+
+    <div class="code-list" aria-label="Folios generados" data-code-list>
+      {% for code in codes %}
+        <button class="code {{ 'used' if code.first_used_at else '' }}" type="button" data-code="{{ code.code }}" title="Copiar folio {{ code.code }}">
+          <strong>{{ code.code }}</strong><small>{{ 'Utilizado' if code.first_used_at else 'Disponible' }}</small>
+        </button>
+      {% else %}
+        <div class="empty inline-empty"><h3>Todavía no hay folios</h3><p>Elige una cantidad y pulsa “Generar folios”.</p></div>
+      {% endfor %}
+    </div>
+    <p class="copy-feedback" data-copy-feedback role="status" aria-live="polite"></p>
+  </section>
+
+  <section class="panel results-panel" id="resultados" aria-labelledby="results-title">
+    <div class="section-heading">
+      <div><span class="step-number">3</span><div><p class="kicker">Tercer paso</p><h2 id="results-title">Revisar resultados</h2></div></div>
+      <p>Selecciona un folio para ver cada intento y respuesta.</p>
+    </div>
+
+    <div class="table-tools">
+      <label class="search-field" for="result-search">Buscar folio
+        <input id="result-search" type="search" placeholder="Ej. AB23CD45" data-result-search />
+      </label>
+      <label for="status-filter">Estado
+        <select id="status-filter" data-status-filter>
+          <option value="">Todos</option>
+          <option value="in_progress">En curso</option>
+          <option value="completed">Completado</option>
+          <option value="abandoned">Abandonado</option>
+        </select>
+      </label>
+    </div>
+
     <div class="table-wrap"><table>
       <thead><tr><th>Folio</th><th>Sesión</th><th>Estado</th><th>Progreso</th><th>Intentos</th><th>1er intento</th><th>Global</th><th>Activo</th><th>Total</th></tr></thead>
-      <tbody>
-        {% for row in session_rows %}<tr>
-          <td><a href="/admin/sessions/{{ row.session.id }}"><strong>{{ row.session.participant_code.code }}</strong></a></td>
+      <tbody data-result-rows>
+        {% for row in session_rows %}<tr data-code-row="{{ row.session.participant_code.code }}" data-status="{{ row.session.status }}">
+          <td><a class="session-link" href="/admin/sessions/{{ row.session.id }}"><strong>{{ row.session.participant_code.code }}</strong><span>Ver detalle</span></a></td>
           <td>{{ 'Principal' if row.session.is_primary else 'Repetición ' ~ row.session.sequence }}</td>
-          <td><span class="status-label {{ row.session.status }}">{{ row.session.status }}</span></td>
-          <td>{{ row.metrics.challenges_completed }}/5 · {{ row.metrics.questions_completed }}/21</td><td>{{ row.metrics.attempts_total }}</td>
+          <td><span class="status-label {{ row.session.status }}">{{ {'in_progress': 'En curso', 'completed': 'Completado', 'abandoned': 'Abandonado'}.get(row.session.status, row.session.status) }}</span></td>
+          <td><strong>{{ row.metrics.challenges_completed }}/5</strong><small class="cell-note">{{ row.metrics.questions_completed }}/21 preguntas</small></td>
+          <td>{{ row.metrics.attempts_total }}</td>
           <td>{{ row.metrics.first_try_accuracy if row.metrics.first_try_accuracy is not none else '—' }}{% if row.metrics.first_try_accuracy is not none %}%{% endif %}</td>
           <td>{{ row.metrics.global_accuracy if row.metrics.global_accuracy is not none else '—' }}{% if row.metrics.global_accuracy is not none %}%{% endif %}</td>
           <td>{{ row.metrics.active_seconds|duration }}</td><td>{{ row.metrics.elapsed_seconds|duration }}</td>
-        </tr>{% else %}<tr><td colspan="9" class="muted">Ningún folio ha iniciado el juego.</td></tr>{% endfor %}
+        </tr>{% else %}<tr><td colspan="9"><div class="empty inline-empty"><h3>Aún no hay resultados</h3><p>Los datos aparecerán cuando un estudiante inicie con uno de estos folios.</p></div></td></tr>{% endfor %}
       </tbody>
+    </table></div>
+    <p class="filter-empty" data-filter-empty hidden>No hay sesiones que coincidan con la búsqueda.</p>
+  </section>
+
+  <section class="panel difficulty-panel" id="dificultad" aria-labelledby="difficulty-title">
+    <div class="section-title-row">
+      <div><p class="kicker">Análisis</p><h2 id="difficulty-title">Dificultad por reto</h2></div>
+      <p>Úsalo para identificar dónde necesita apoyo el grupo.</p>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Reto</th><th>Sesiones</th><th>Preguntas</th><th>Intentos</th><th>1er intento</th><th>Global</th></tr></thead>
+      <tbody>{% for row in difficulty %}<tr>
+        <td><strong>Situación {{ row.scene_number }}</strong></td><td>{{ row.sessions_attempted }}</td><td>{{ row.questions_attempted }}</td><td>{{ row.attempts }}</td>
+        <td>{{ row.first_try_accuracy if row.first_try_accuracy is not none else '—' }}{% if row.first_try_accuracy is not none %}%{% endif %}</td>
+        <td>{{ row.global_accuracy if row.global_accuracy is not none else '—' }}{% if row.global_accuracy is not none %}%{% endif %}</td>
+      </tr>{% endfor %}</tbody>
     </table></div>
   </section>
 
   <details class="danger-zone panel">
-    <summary>Eliminar esta aplicación y todos sus datos</summary>
-    <p>Esta acción elimina folios, sesiones, respuestas y tiempos. Exporta los CSV antes de continuar.</p>
+    <summary>Administrar o eliminar este grupo</summary>
+    <p>Al eliminarlo también se borran sus folios, sesiones, respuestas y tiempos. Descarga los archivos antes de continuar.</p>
     <form action="/admin/applications/{{ application.id }}/delete" method="post" class="inline-form">
       <input type="hidden" name="csrf" value="{{ csrf_token }}" />
       <label class="grow">Escribe <strong>{{ application.name }}</strong> para confirmar
         <input name="confirmation" required autocomplete="off" />
       </label>
-      <button class="danger" type="submit">Eliminar definitivamente</button>
+      <button class="danger" type="submit">Eliminar grupo definitivamente</button>
     </form>
   </details>
 {% endblock %}

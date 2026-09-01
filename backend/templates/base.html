@@ -3,16 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{% block title %}Administración{% endblock %} · El día de Tadeo</title>
+    <meta name="description" content="Panel docente de El día de Tadeo" />
+    <title>{% block title %}Panel docente{% endblock %} · El día de Tadeo</title>
     <link rel="stylesheet" href="/admin-static/admin.css" />
+    <script src="/admin-static/admin.js" defer></script>
   </head>
   <body>
+    <a class="skip-link" href="#main-content">Saltar al contenido</a>
     <header class="admin-header">
-      <a class="admin-brand" href="/admin"><span>T</span><strong>Resultados de Tadeo</strong></a>
+      <a class="admin-brand" href="/admin" aria-label="Ir al inicio del panel docente">
+        <span aria-hidden="true">T</span>
+        <span><strong>El día de Tadeo</strong><small>Panel docente</small></span>
+      </a>
       {% if request.cookies.get('tadeo_admin') %}
-        <nav>
-          <a href="/admin/rag">Asistente RAG</a>
-          <a href="/">Abrir juego</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="teacher-nav">Menú</button>
+        <nav id="teacher-nav" aria-label="Navegación del panel">
+          <a class="{{ 'active' if current_path == '/admin' or current_path.startswith('/admin/applications') or current_path.startswith('/admin/sessions') else '' }}" href="/admin">Mis grupos</a>
+          <a class="{{ 'active' if current_path.startswith('/admin/rag') else '' }}" href="/admin/rag">Asistente</a>
+          <a href="/" target="_blank" rel="noopener">Ver juego</a>
           <form action="/admin/logout" method="post">
             <input type="hidden" name="csrf" value="{{ csrf_token }}" />
             <button type="submit">Cerrar sesión</button>
@@ -20,6 +28,9 @@
         </nav>
       {% endif %}
     </header>
-    <main class="admin-main">{% block content %}{% endblock %}</main>
+    <main class="admin-main" id="main-content" tabindex="-1">{% block content %}{% endblock %}</main>
+    <footer class="admin-footer">
+      <p>Se registran folios anónimos, respuestas y tiempos. No se guardan nombres ni correos.</p>
+    </footer>
   </body>
 </html>

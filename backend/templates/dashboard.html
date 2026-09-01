@@ -1,36 +1,51 @@
 {% extends "base.html" %}
-{% block title %}Aplicaciones{% endblock %}
+{% block title %}Mis grupos{% endblock %}
 {% block content %}
-  <div class="page-heading">
-    <div><p class="kicker">Panel del aplicador</p><h1>Aplicaciones y grupos</h1></div>
+  <div class="page-heading dashboard-heading">
+    <div><p class="kicker">Panel docente</p><h1>Mis grupos</h1><p class="page-lead">Prepara una aplicación y consulta el avance de cada folio.</p></div>
+    <a class="button primary" href="#nuevo-grupo">Crear grupo</a>
   </div>
 
-  <section class="panel compact-panel">
-    <h2>Nueva aplicación</h2>
+  <section class="overview-grid" aria-label="Resumen general">
+    <article class="overview-card"><span>Grupos</span><strong>{{ dashboard_summary.applications }}</strong><small>aplicaciones creadas</small></article>
+    <article class="overview-card"><span>Participantes</span><strong>{{ dashboard_summary.participants }}</strong><small>folios que iniciaron</small></article>
+    <article class="overview-card"><span>Sesiones</span><strong>{{ dashboard_summary.sessions }}</strong><small>incluye repeticiones</small></article>
+  </section>
+
+  <section class="panel setup-panel" id="nuevo-grupo">
+    <div class="section-heading">
+      <div><span class="step-number">1</span><div><p class="kicker">Primer paso</p><h2>Crear un grupo o aplicación</h2></div></div>
+      <p>Usa un nombre que después puedas reconocer fácilmente.</p>
+    </div>
     <form action="/admin/applications" method="post" class="inline-form">
       <input type="hidden" name="csrf" value="{{ csrf_token }}" />
-      <label class="grow">Nombre o grupo
+      <label class="grow">Nombre del grupo
         <input name="name" maxlength="120" placeholder="Ej. Secundaria 2º B · septiembre 2026" required />
       </label>
-      <button class="primary" type="submit">Crear aplicación</button>
+      <button class="primary" type="submit">Crear grupo y continuar</button>
     </form>
   </section>
 
+  <div class="section-title-row"><div><p class="kicker">Historial</p><h2>Grupos creados</h2></div><span>{{ dashboard_summary.applications }} en total</span></div>
   <section class="application-grid">
     {% for row in rows %}
       <a class="application-card panel" href="/admin/applications/{{ row.application.id }}">
-        <span class="status-dot {{ 'active' if row.application.is_active else '' }}"></span>
+        <span class="status-pill {{ 'active' if row.application.is_active else '' }}">{{ 'Activo' if row.application.is_active else 'Cerrado' }}</span>
         <h2>{{ row.application.name }}</h2>
-        <p>Creada {{ row.application.created_at.strftime('%Y-%m-%d') }}</p>
+        <p>Creado el {{ row.application.created_at.strftime('%d/%m/%Y') }}</p>
         <dl class="mini-stats">
           <div><dt>Participantes</dt><dd>{{ row.summary.participants }}</dd></div>
           <div><dt>Finalización</dt><dd>{{ row.summary.completion_rate if row.summary.completion_rate is not none else '—' }}{% if row.summary.completion_rate is not none %}%{% endif %}</dd></div>
-          <div><dt>Repeticiones</dt><dd>{{ row.summary.retakes }}</dd></div>
+          <div><dt>Sesiones</dt><dd>{{ row.summary.sessions }}</dd></div>
         </dl>
+        <span class="card-link">Administrar grupo</span>
       </a>
     {% else %}
-      <div class="empty panel">Aún no hay aplicaciones. Crea la primera para generar folios anónimos.</div>
+      <div class="empty panel">
+        <span class="empty-mark" aria-hidden="true">T</span>
+        <h3>Aún no hay grupos</h3>
+        <p>Crea el primero arriba; después podrás generar los folios para tus estudiantes.</p>
+      </div>
     {% endfor %}
   </section>
 {% endblock %}
-

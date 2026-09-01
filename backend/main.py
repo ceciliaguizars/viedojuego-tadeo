@@ -86,7 +86,12 @@ def _state_payload(game_session: GameSession) -> dict[str, object]:
 
 
 def _admin_context(request: Request, **values: object) -> dict[str, object]:
-    return {"request": request, "csrf_token": csrf_token(), **values}
+    return {
+        "request": request,
+        "csrf_token": csrf_token(),
+        "current_path": request.url.path,
+        **values,
+    }
 
 
 def _format_seconds(value: float | int | None) -> str:
@@ -257,11 +262,22 @@ def admin_home(request: Request, database: Session = Depends(get_db)) -> Respons
             .where(ParticipantCode.application_id == application.id)
         ).all()
         rows.append({"application": application, "summary": application_summary(sessions)})
+    dashboard_summary = {
+        "applications": len(rows),
+        "participants": sum(int(row["summary"]["participants"]) for row in rows),
+        "sessions": sum(int(row["summary"]["sessions"]) for row in rows),
+    }
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
-        context=_admin_context(request, rows=rows),
+        context=_admin_context(request, rows=rows, dashboard_summary=dashboard_summary),
     )
+
+
+@app.get("/profesor")
+def teacher_portal() -> RedirectResponse:
+    """Ruta fácil de recordar para acceder al panel docente."""
+    return RedirectResponse("/admin", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @app.post("/admin/login")
@@ -387,9 +403,11 @@ def application_detail(
     codes = database.scalars(
         select(ParticipantCode)
         .where(ParticipantCode.application_id == application_id)
-        .order_by(ParticipantCode.code)
+        .order_by(ParticipantCode.first_used_at.is_not(None), ParticipantCode.code)
     ).all()
     session_rows = [{"session": item, "metrics": session_metrics(item)} for item in sessions]
+    available_codes = [item for item in codes if item.is_active and item.first_used_at is None]
+    used_codes = [item for item in codes if item.first_used_at is not None]
     return templates.TemplateResponse(
         request=request,
         name="application.html",
@@ -397,6 +415,8 @@ def application_detail(
             request,
             application=application,
             codes=codes,
+            available_codes=available_codes,
+            used_codes=used_codes,
             session_rows=session_rows,
             summary=application_summary(sessions),
             difficulty=difficulty_by_scene(sessions),
@@ -417,7 +437,10 @@ def create_codes(
     if not database.get(Application, application_id):
         raise HTTPException(status_code=404, detail="Aplicación no encontrada")
     generate_unique_codes(database, application_id, count)
-    return RedirectResponse(f"/admin/applications/{application_id}", status_code=303)
+    return RedirectResponse(
+        f"/admin/applications/{application_id}?generated={count}#codigos",
+        status_code=303,
+    )
 
 
 @app.post("/admin/applications/{application_id}/delete")
@@ -480,6 +503,37 @@ def _csv_response(rows: list[list[object]], filename: str) -> Response:
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.get("/admin/applications/{application_id}/exports/codes.csv")
+def export_codes(application_id: int, request: Request, database: Session = Depends(get_db)) -> Response:
+    require_admin(request)
+    application = database.get(Application, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Aplicación no encontrada")
+    codes = database.scalars(
+        select(ParticipantCode)
+        .where(ParticipantCode.application_id == application_id)
+        .order_by(ParticipantCode.code)
+    ).all()
+    rows: list[list[object]] = [[
+        "aplicacion", "folio", "estado", "creado_utc", "primer_uso_utc",
+    ]]
+    for item in codes:
+        if not item.is_active:
+            code_status = "inactivo"
+        elif item.first_used_at:
+            code_status = "utilizado"
+        else:
+            code_status = "disponible"
+        rows.append([
+            application.name,
+            item.code,
+            code_status,
+            item.created_at.isoformat(),
+            item.first_used_at.isoformat() if item.first_used_at else "",
+        ])
+    return _csv_response(rows, f"{application.id}-folios.csv")
 
 
 @app.get("/admin/applications/{application_id}/exports/sessions.csv")

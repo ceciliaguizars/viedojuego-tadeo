@@ -1,21 +1,38 @@
 {% extends "base.html" %}
-{% block title %}Acceso administrativo{% endblock %}
+{% block title %}Acceso docente{% endblock %}
 {% block content %}
-  <section class="login-card panel">
-    <p class="kicker">Panel protegido</p>
-    <h1>Estadísticas de aplicación</h1>
-    <p>Ingresa la clave administrativa para crear folios, consultar resultados y exportar los datos.</p>
-    {% if not configured %}
-      <div class="notice warning">El servidor todavía no tiene configurada la variable <code>ADMIN_PASSWORD_HASH</code>.</div>
-    {% endif %}
-    {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
-    <form action="/admin/login" method="post" class="stack-form">
-      <input type="hidden" name="csrf" value="{{ csrf_token }}" />
-      <label>Contraseña
-        <input type="password" name="password" autocomplete="current-password" required {% if not configured %}disabled{% endif %} />
-      </label>
-      <button class="primary" type="submit" {% if not configured %}disabled{% endif %}>Entrar</button>
-    </form>
-  </section>
+  <div class="login-layout">
+    <section class="login-intro" aria-labelledby="login-title">
+      <p class="kicker">Espacio para docentes</p>
+      <h1 id="login-title">Prepara la actividad y acompaña el avance del grupo.</h1>
+      <p>Desde aquí puedes crear un grupo, entregar folios anónimos y revisar los resultados sin pedir datos personales.</p>
+      <ol class="login-benefits">
+        <li><span>1</span><div><strong>Crea un grupo</strong><small>Organiza cada aplicación o periodo.</small></div></li>
+        <li><span>2</span><div><strong>Genera los folios</strong><small>Descárgalos o cópialos para repartirlos.</small></div></li>
+        <li><span>3</span><div><strong>Revisa los resultados</strong><small>Consulta avance, intentos, precisión y tiempo.</small></div></li>
+      </ol>
+    </section>
+    <section class="login-card panel" aria-labelledby="access-title">
+      <p class="kicker">Acceso protegido</p>
+      <h2 id="access-title">Entrar al panel</h2>
+      <p class="muted">Usa la contraseña docente configurada al instalar el juego.</p>
+      {% if not configured %}
+        <div class="notice warning" role="alert">
+          <strong>El acceso aún no está listo.</strong>
+          <span>Ejecuta <code>dev.command</code> para configurar la contraseña docente y vuelve a cargar esta página.</span>
+        </div>
+      {% endif %}
+      {% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+      <form action="/admin/login" method="post" class="stack-form">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+        <label for="teacher-password">Contraseña docente</label>
+        <div class="password-field">
+          <input id="teacher-password" type="password" name="password" autocomplete="current-password" required {% if not configured %}disabled{% endif %} />
+          <button class="password-toggle" type="button" data-toggle-password aria-controls="teacher-password" {% if not configured %}disabled{% endif %}>Mostrar</button>
+        </div>
+        <button class="primary wide" type="submit" {% if not configured %}disabled{% endif %}>Entrar al panel</button>
+      </form>
+      <a class="student-return" href="/">Volver al juego de estudiantes</a>
+    </section>
+  </div>
 {% endblock %}
-

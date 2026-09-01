@@ -119,3 +119,29 @@ def test_admin_dashboard_application_and_session_pages_render(client, participan
     detail = client.get(f"/admin/sessions/{session['state']['session_id']}")
     assert detail.status_code == 200
     assert "Resultado individual" in detail.text
+
+
+def test_teacher_portal_redirects_to_admin(client):
+    response = client.get("/profesor", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/admin"
+
+
+def test_teacher_ui_and_code_export(client, participant_code):
+    client.cookies.set(ADMIN_COOKIE, create_admin_cookie())
+    dashboard = client.get("/admin")
+    assert "Panel docente" in dashboard.text
+    assert "Crear grupo y continuar" in dashboard.text
+
+    application = client.get("/admin/applications/1")
+    assert "Generar y entregar folios" in application.text
+    assert "Copiar disponibles" in application.text
+    assert "Revisar resultados" in application.text
+
+    exported = client.get("/admin/applications/1/exports/codes.csv")
+    assert exported.status_code == 200
+    assert exported.content.startswith(b"\xef\xbb\xbf")
+    decoded = exported.content.decode("utf-8-sig")
+    assert "aplicacion,folio,estado" in decoded
+    assert participant_code in decoded
+    assert "disponible" in decoded

@@ -9,7 +9,7 @@ paginas: 1
 modelo: "4x = 120"
 resultado: "x = 30 minutos"
 ---
-
+q
 # Situación 1 · Organizando el tiempo
 
 [[../01 Proyecto/Narrativa|← Narrativa]] · [[Situación 2 - Alimentando a su mascota|Siguiente →]]

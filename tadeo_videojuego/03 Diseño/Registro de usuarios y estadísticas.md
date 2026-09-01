@@ -90,17 +90,26 @@ Los indicadores agregados usan las **sesiones principales** para evitar que las 
 
 Cada sesión recibe un token aleatorio. El token se guarda como hash en la base y evita que un participante consulte la sesión de otro folio.
 
-## Panel del aplicador
+## Panel docente
 
-El panel está disponible en `/admin` y permite:
+El acceso docente es visible en la barra superior del juego. También puede abrirse directamente en `/profesor`, que conduce al panel protegido.
 
-1. Crear una aplicación o grupo.
-2. Generar entre 1 y 500 folios anónimos.
-3. Distinguir folios disponibles y utilizados.
-4. Consultar estadísticas agregadas y dificultad por situación.
-5. Abrir el historial de cada sesión y revisar sus respuestas.
-6. Exportar un CSV de sesiones y otro de intentos, ambos compatibles con Excel.
-7. Eliminar una aplicación completa mediante confirmación escrita.
+La experiencia organiza el trabajo en tres pasos:
+
+1. **Crear un grupo o aplicación.** El nombre puede incluir grado, sección y periodo para facilitar su identificación.
+2. **Generar y entregar folios.** El profesor elige entre 1 y 500 códigos, copia los disponibles, imprime tarjetas o descarga el listado CSV. Los folios usados se distinguen visualmente y nunca se regeneran.
+3. **Revisar resultados.** La vista permite buscar por folio, filtrar por estado y abrir el detalle de cada sesión. También muestra finalización, exactitud, intentos y tiempos del grupo.
+
+Cada grupo incluye:
+
+- Resumen agregado y dificultad por situación.
+- Historial individual de sesiones, respuestas e intentos.
+- Exportación de folios.
+- Exportación del resumen por sesión.
+- Exportación del historial detallado de intentos.
+- Eliminación completa mediante confirmación escrita.
+
+Al imprimir, se incluyen solamente los folios disponibles para evitar reasignar un código ya utilizado.
 
 El acceso usa una contraseña Argon2 configurada en `ADMIN_PASSWORD_HASH`. La sesión administrativa viaja en una cookie `HttpOnly`, `SameSite=Lax` y `Secure` cuando `COOKIE_SECURE=true`.
 
@@ -164,4 +173,3 @@ Para ejecutar la suite sobre una base PostgreSQL desechable, el nombre de la bas
 ```bash
 TEST_DATABASE_URL=postgresql+psycopg://usuario:clave@localhost/tadeo_test npm test
 ```
-

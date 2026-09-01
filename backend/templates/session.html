@@ -1,9 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ game_session.participant_code.code }}{% endblock %}
 {% block content %}
+  <nav class="breadcrumbs" aria-label="Migas de pan">
+    <a href="/admin">Mis grupos</a><span aria-hidden="true">/</span><a href="/admin/applications/{{ game_session.participant_code.application_id }}">{{ game_session.participant_code.application.name }}</a><span aria-hidden="true">/</span><span aria-current="page">{{ game_session.participant_code.code }}</span>
+  </nav>
   <div class="page-heading">
-    <div><a class="back" href="/admin/applications/{{ game_session.participant_code.application_id }}">← {{ game_session.participant_code.application.name }}</a><p class="kicker">Resultado individual</p><h1>Folio {{ game_session.participant_code.code }}</h1></div>
-    <span class="status-label {{ game_session.status }}">{{ game_session.status }}</span>
+    <div><p class="kicker">Resultado individual</p><h1>Folio {{ game_session.participant_code.code }}</h1><p class="page-lead">Detalle de avance, precisión, tiempos y respuestas enviadas.</p></div>
+    <span class="status-label large {{ game_session.status }}">{{ {'in_progress': 'En curso', 'completed': 'Completado', 'abandoned': 'Abandonado'}.get(game_session.status, game_session.status) }}</span>
   </div>
   <section class="stat-grid">
     <article class="stat panel"><span>Tipo</span><strong class="small-value">{{ 'Principal' if game_session.is_primary else 'Repetición ' ~ game_session.sequence }}</strong></article>
@@ -20,7 +23,7 @@
       {% if group.attempts %}<div class="table-wrap"><table>
         <thead><tr><th>Pregunta</th><th>Intento</th><th>Resultado</th><th>Respuestas</th><th>Hora UTC</th><th>Activo acumulado</th></tr></thead>
         <tbody>{% for attempt in group.attempts %}<tr>
-          <td>{{ attempt.step_index + 1 }}</td><td>{{ attempt.attempt_number }}</td><td>{{ 'Correcta' if attempt.is_correct else 'Incorrecta' }}</td>
+          <td>{{ attempt.step_index + 1 }}</td><td>{{ attempt.attempt_number }}</td><td><span class="answer-label {{ 'correct' if attempt.is_correct else 'incorrect' }}">{{ 'Correcta' if attempt.is_correct else 'Incorrecta' }}</span></td>
           <td><code>{{ attempt.answers }}</code></td><td>{{ attempt.submitted_at.isoformat() }}</td><td>{{ attempt.active_seconds_at_submit|duration }}</td>
         </tr>{% endfor %}</tbody>
       </table></div>{% else %}<p class="muted">Sin intentos.</p>{% endif %}

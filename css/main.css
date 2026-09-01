@@ -38,6 +38,8 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 4px solid 
 .brand strong { line-height: 1.05; }
 .brand small { margin-top: .15rem; color: var(--ink-soft); font-size: .72rem; }
 .status-group { display: flex; align-items: center; gap: .55rem; }
+.teacher-access { min-height: 2.7rem; display: inline-flex; align-items: center; padding: .5rem .75rem; border: 2px solid var(--teal-dark); border-radius: 10px; color: var(--teal-dark); background: var(--mint); font-size: .82rem; font-weight: 900; text-decoration: none; box-shadow: 2px 2px 0 rgb(36 53 58 / 12%); }
+.teacher-access:hover { color: white; background: var(--teal); }
 .time-card, .icon-button { min-height: 2.7rem; display: flex; align-items: center; gap: .45rem; padding: .55rem .8rem; border: 2px solid rgb(36 53 58 / 20%); border-radius: 10px; background: white; }
 .time-card strong { font-variant-numeric: tabular-nums; }
 .icon-button { cursor: pointer; font-weight: 800; box-shadow: 2px 2px 0 rgb(36 53 58 / 14%); transition: transform 140ms ease, box-shadow 140ms ease; }
@@ -147,6 +149,7 @@ dialog::backdrop { background: rgb(20 37 38 / 68%); backdrop-filter: blur(4px); 
   .game-bar { align-items: flex-start; }
   .brand small, .time-card { display: none; }
   .icon-button { padding-inline: .65rem; font-size: .82rem; }
+  .teacher-access { min-height: 2.35rem; padding: .35rem .55rem; font-size: .74rem; }
   .hero-card, .finish-screen .hero-card { grid-template-columns: 1fr; }
   .hero-character { min-height: 260px; }
   .hero-character img { height: 300px; }
@@ -160,6 +163,7 @@ dialog::backdrop { background: rgb(20 37 38 / 68%); backdrop-filter: blur(4px); 
   .brand strong { font-size: .82rem; }
   .brand-mark { width: 2.2rem; height: 2.2rem; }
   .status-group { gap: .3rem; }
+  .teacher-access { position: fixed; right: .65rem; bottom: .65rem; z-index: 60; min-height: 2.5rem; box-shadow: 3px 3px 0 rgb(36 53 58 / 18%); }
   .icon-button { min-height: 2.35rem; padding: .35rem .5rem; }
   .discoveries-button { font-size: 0; }
   .discoveries-button::before { content: "Descubrimientos"; font-size: .76rem; }

@@ -60,7 +60,16 @@ Las ejecuciones posteriores reutilizan la preparación existente. Desde terminal
 npm run dev
 ```
 
-El juego queda en `http://127.0.0.1:4173/` y el panel protegido en `http://127.0.0.1:4173/admin`.
+El juego queda en `http://127.0.0.1:4173/`. El profesor puede entrar desde el botón **Acceso docente** del juego o directamente en `http://127.0.0.1:4173/profesor`.
+
+### Recorrido del profesor
+
+1. Abre **Acceso docente** e ingresa la contraseña configurada durante la instalación.
+2. Crea un grupo o periodo de aplicación.
+3. Genera la cantidad de folios necesaria. Puede copiar los disponibles, imprimirlos o descargarlos como CSV.
+4. Entrega un folio de ocho caracteres a cada estudiante para que ingrese al juego.
+5. Revisa el resumen del grupo o busca un folio para consultar sus intentos, precisión, avance y tiempos.
+6. Descarga el resumen por sesión o el historial detallado de intentos cuando necesite trabajar los datos en Excel.
 
 ## Persistencia y estadísticas
 
