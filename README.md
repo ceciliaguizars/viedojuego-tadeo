@@ -62,6 +62,56 @@ npm run dev
 
 El juego queda en `http://127.0.0.1:4173/`. El profesor puede entrar desde el botón **Acceso docente** del juego o directamente en `http://127.0.0.1:4173/profesor`.
 
+## Publicación en Render
+
+El archivo `render.yaml` permite crear en una sola operación un servicio web FastAPI y una base PostgreSQL. La configuración usa inicialmente los planes gratuitos para evitar cargos durante las pruebas. Antes de una aplicación escolar real, consulta las limitaciones vigentes y cambia la base a un plan con respaldos y permanencia.
+
+### 1. Prepara la contraseña docente
+
+Genera el hash Argon2 en tu computadora. La contraseña no se imprime ni se sube a GitHub:
+
+```bash
+.venv/bin/python -m backend.security hash-password
+```
+
+Conserva temporalmente el resultado completo que comienza con `$argon2`; Render lo solicitará como `ADMIN_PASSWORD_HASH`.
+
+### 2. Sube esta preparación a GitHub
+
+Confirma que `render.yaml`, `.python-version` y los cambios del proyecto estén en la rama que vas a publicar. El archivo local `.env` está excluido por `.gitignore` y nunca debe agregarse al repositorio.
+
+### 3. Crea el Blueprint
+
+1. Inicia sesión en [Render](https://dashboard.render.com/) usando la cuenta que tendrá a su cargo la aplicación.
+2. Selecciona **New > Blueprint** y conecta el repositorio de GitHub.
+3. Elige la rama `main` y confirma que Render encontró `render.yaml`.
+4. Cuando Render solicite `ADMIN_PASSWORD_HASH`, pega el hash completo generado en el paso 1, no la contraseña original.
+5. Revisa los dos recursos que se crearán: `el-dia-de-tadeo` y `tadeo-postgres`. Confirma la creación.
+
+Render instalará las dependencias, aplicará las migraciones de Alembic y arrancará FastAPI. `SECRET_KEY` se genera automáticamente, la cookie docente se limita a HTTPS y la base no admite conexiones públicas externas.
+
+### 4. Comprueba la publicación
+
+Cuando el despliegue termine, Render mostrará una URL similar a:
+
+```text
+https://el-dia-de-tadeo.onrender.com
+```
+
+Comprueba las siguientes rutas:
+
+- `/health` debe responder `{"status":"ok"}`.
+- `/` abre el acceso de los estudiantes.
+- `/profesor` abre el panel protegido por la contraseña docente.
+
+En el panel crea un grupo, genera un folio de prueba y completa al menos una pregunta desde otro navegador antes de entregar los folios al grupo.
+
+### Actualizaciones posteriores
+
+Los cambios confirmados y enviados a la rama conectada se vuelven a desplegar automáticamente. El arranque ejecuta `alembic upgrade head`, por lo que también aplica cualquier migración nueva antes de aceptar tráfico.
+
+`OPENAI_API_KEY` es opcional y solo se requiere para el asistente RAG privado. Si se habilita, agrégala como variable secreta desde el panel de Render; nunca la escribas en `render.yaml` ni en GitHub.
+
 ### Recorrido del profesor
 
 1. Abre **Acceso docente** e ingresa la contraseña configurada durante la instalación.

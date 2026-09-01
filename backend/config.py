@@ -15,6 +15,14 @@ def _as_bool(value: str | None, default: bool = False) -> bool:
     return value.lower() in {"1", "true", "yes", "sí", "si", "on"}
 
 
+def _normalize_database_url(value: str) -> str:
+    """Use psycopg 3 for PostgreSQL URLs supplied by hosting providers."""
+    for prefix in ("postgres://", "postgresql://"):
+        if value.startswith(prefix):
+            return f"postgresql+psycopg://{value.removeprefix(prefix)}"
+    return value
+
+
 def _project_path(value: str | None, default: Path) -> Path:
     path = Path(value).expanduser() if value else default
     return path if path.is_absolute() else PROJECT_ROOT / path
@@ -22,7 +30,9 @@ def _project_path(value: str | None, default: Path) -> Path:
 
 @dataclass(frozen=True)
 class Settings:
-    database_url: str = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+    database_url: str = _normalize_database_url(
+        os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+    )
     admin_password_hash: str = os.getenv("ADMIN_PASSWORD_HASH", "")
     secret_key: str = os.getenv("SECRET_KEY", "development-only-change-me")
     cookie_secure: bool = _as_bool(os.getenv("COOKIE_SECURE"), False)
