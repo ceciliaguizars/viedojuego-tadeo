@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="El día de Tadeo: una aventura narrativa para descubrir las ecuaciones." />
+    <title>El día de Tadeo</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23e46f36'/%3E%3Ctext x='32' y='45' text-anchor='middle' font-size='40' font-family='Arial' font-weight='700' fill='white'%3ET%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./css/main.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#app">Saltar al juego</a>
+    <div class="game-shell">
+      <header class="game-bar" aria-label="Estado del juego">
+        <a class="brand" href="./" aria-label="Volver al inicio">
+          <span class="brand-mark" aria-hidden="true">T</span>
+          <span><strong>El día de Tadeo</strong><small>Una aventura matemática</small></span>
+        </a>
+        <div class="status-group">
+          <div class="time-card" aria-label="Tiempo ficticio restante"><span aria-hidden="true">◷</span><span><strong id="time-value">120</strong> min</span></div>
+          <button class="icon-button" id="agenda-button" type="button" aria-haspopup="dialog"><span aria-hidden="true">☑</span>Agenda</button>
+          <button class="icon-button discoveries-button" id="discoveries-button" type="button" aria-haspopup="dialog"><span aria-hidden="true">✦</span>Mis descubrimientos <span class="badge" id="discovery-count" aria-label="descubrimientos desbloqueados">0</span></button>
+        </div>
+      </header>
+      <div class="progress-track" aria-label="Progreso de la historia"><span id="progress-bar"></span></div>
+      <main id="app" tabindex="-1"></main>
+    </div>
+
+    <dialog class="notebook-dialog" id="agenda-dialog" aria-labelledby="agenda-title">
+      <button class="dialog-close" type="button" data-close-dialog aria-label="Cerrar agenda">×</button>
+      <div class="dialog-heading"><span class="dialog-kicker">Plan de la tarde</span><h2 id="agenda-title">La agenda de Tadeo</h2></div>
+      <ol class="agenda-list" id="agenda-list"></ol>
+      <p class="agenda-note" id="agenda-note">Cada actividad dispone de 30 minutos.</p>
+    </dialog>
+
+    <dialog class="discoveries-dialog" id="discoveries-dialog" aria-labelledby="discoveries-title">
+      <button class="dialog-close" type="button" data-close-dialog aria-label="Cerrar descubrimientos">×</button>
+      <div class="dialog-heading"><span class="dialog-kicker">Colección de ideas</span><h2 id="discoveries-title">Mis descubrimientos</h2></div>
+      <div class="discoveries-grid" id="discoveries-list"></div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="./js/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "el-dia-de-tadeo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Videojuego educativo narrativo para introducir ecuaciones de primer grado.",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev-server.mjs --open",
+    "dev:server": "node scripts/dev-server.mjs",
+    "check": "node --check js/app.js && node --check scripts/dev-server.mjs"
+  }
+}
