@@ -111,7 +111,13 @@ Tadeo encontró el precio correcto y pudo realizar la compra.
 
 - Fondo: interior de la papelería.
 - Sprites: encargado, tres cuadernos y caja de colores.
-- Interacciones: campo de ecuación y tarjetas seleccionables de cuadernos.
+- Flujo implementado de 4 etapas:
+    1. Identificar datos conocidos y el precio desconocido de cada cuaderno.
+    2. Representar los cinco cuadernos y construir $5x+45=195$.
+    3. Resolver la ecuación y elegir el cuaderno de $30.
+    4. Sustituir $x=30$ y comprobar que el total es $195$.
+- Interacciones: campos numéricos y algebraicos, opciones conceptuales y tarjetas seleccionables de cuadernos.
+- Navegación: cada etapa debe comprobarse antes de habilitar la siguiente.
 - Formalización: suma repetida, multiplicación algebraica y definición de ecuación.
 - Efecto narrativo: segunda actividad marcada y 60 minutos ficticios restantes.
 

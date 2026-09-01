@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Administración{% endblock %} · El día de Tadeo</title>
+    <link rel="stylesheet" href="/admin-static/admin.css" />
+  </head>
+  <body>
+    <header class="admin-header">
+      <a class="admin-brand" href="/admin"><span>T</span><strong>Resultados de Tadeo</strong></a>
+      {% if request.cookies.get('tadeo_admin') %}
+        <nav>
+          <a href="/admin/rag">Asistente RAG</a>
+          <a href="/">Abrir juego</a>
+          <form action="/admin/logout" method="post">
+            <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+            <button type="submit">Cerrar sesión</button>
+          </form>
+        </nav>
+      {% endif %}
+    </header>
+    <main class="admin-main">{% block content %}{% endblock %}</main>
+  </body>
+</html>

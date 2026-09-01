@@ -83,6 +83,20 @@ Tadeo consulta por última vez su agenda. Todas las actividades aparecen complet
 | Tras situación 4 | ✓ | ✓ | ✓ | Pendiente |
 | Cierre | ✓ | ✓ | ✓ | ✓ |
 
+## Ritmo didáctico en la interfaz
+
+La narrativa se desarrolla mediante **21 etapas de preguntas** distribuidas entre las cinco situaciones. Cada escena permanece visible mientras el jugador avanza por las preguntas que le corresponden.
+
+| Situación | Preguntas | Cierre narrativo |
+|---|---:|---|
+| Organizando el tiempo | 3 | Se establecen bloques de 30 minutos |
+| Alimentando a su perro | 4 | Se completa la primera tarea y se agenda la compra futura |
+| En la papelería | 4 | Se completa la segunda tarea |
+| Registrando sus gastos | 5 | Se completa la tercera tarea |
+| Ayudando con la cena | 5 | Se completa la cuarta tarea y termina el día |
+
+La historia no avanza con una respuesta parcial: primero se recorren las etapas de comprensión, representación y comprobación de la situación. Solo entonces se actualizan la agenda, el tiempo ficticio y el descubrimiento correspondiente.
+
 ## Enlaces
 
 - [[../02 Situaciones/Situación 1 - Organizando el tiempo]]

@@ -98,7 +98,14 @@ $$
 
 - Fondo: tienda de regalos.
 - Sprites: encargada, tres regalos equivalentes y registro de ahorros.
-- Interacciones: elección libre del regalo, campo de ecuación y valor de cada ingreso.
+- Flujo implementado de 5 etapas:
+    1. Elegir libremente un regalo e identificar la cantidad desconocida.
+    2. Construir $4x-180=300$.
+    3. Interpretar el significado contextual de $4x$, $-180$ y $300$.
+    4. Recuperar los $480$ anteriores al gasto y calcular ingresos de $120.
+    5. Sustituir el resultado y comprobar que quedan $300.
+- Interacciones: tarjetas de regalo, campo algebraico, campos numéricos y selecciones conceptuales.
+- Navegación: cada etapa debe comprobarse antes de habilitar la siguiente.
 - Formalización: significado contextual de cada término en $Ax-B=C$.
 - Efecto narrativo: tercera actividad marcada y 30 minutos ficticios restantes.
 

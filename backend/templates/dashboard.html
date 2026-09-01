@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Aplicaciones{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <div><p class="kicker">Panel del aplicador</p><h1>Aplicaciones y grupos</h1></div>
+  </div>
+
+  <section class="panel compact-panel">
+    <h2>Nueva aplicación</h2>
+    <form action="/admin/applications" method="post" class="inline-form">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+      <label class="grow">Nombre o grupo
+        <input name="name" maxlength="120" placeholder="Ej. Secundaria 2º B · septiembre 2026" required />
+      </label>
+      <button class="primary" type="submit">Crear aplicación</button>
+    </form>
+  </section>
+
+  <section class="application-grid">
+    {% for row in rows %}
+      <a class="application-card panel" href="/admin/applications/{{ row.application.id }}">
+        <span class="status-dot {{ 'active' if row.application.is_active else '' }}"></span>
+        <h2>{{ row.application.name }}</h2>
+        <p>Creada {{ row.application.created_at.strftime('%Y-%m-%d') }}</p>
+        <dl class="mini-stats">
+          <div><dt>Participantes</dt><dd>{{ row.summary.participants }}</dd></div>
+          <div><dt>Finalización</dt><dd>{{ row.summary.completion_rate if row.summary.completion_rate is not none else '—' }}{% if row.summary.completion_rate is not none %}%{% endif %}</dd></div>
+          <div><dt>Repeticiones</dt><dd>{{ row.summary.retakes }}</dd></div>
+        </dl>
+      </a>
+    {% else %}
+      <div class="empty panel">Aún no hay aplicaciones. Crea la primera para generar folios anónimos.</div>
+    {% endfor %}
+  </section>
+{% endblock %}
+

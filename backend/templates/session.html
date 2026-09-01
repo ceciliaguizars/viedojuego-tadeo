@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ game_session.participant_code.code }}{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <div><a class="back" href="/admin/applications/{{ game_session.participant_code.application_id }}">← {{ game_session.participant_code.application.name }}</a><p class="kicker">Resultado individual</p><h1>Folio {{ game_session.participant_code.code }}</h1></div>
+    <span class="status-label {{ game_session.status }}">{{ game_session.status }}</span>
+  </div>
+  <section class="stat-grid">
+    <article class="stat panel"><span>Tipo</span><strong class="small-value">{{ 'Principal' if game_session.is_primary else 'Repetición ' ~ game_session.sequence }}</strong></article>
+    <article class="stat panel"><span>Progreso</span><strong>{{ metrics.challenges_completed }}/5</strong><small>{{ metrics.questions_completed }}/21 preguntas</small></article>
+    <article class="stat panel"><span>Intentos</span><strong>{{ metrics.attempts_total }}</strong></article>
+    <article class="stat panel"><span>1er intento</span><strong>{{ metrics.first_try_accuracy if metrics.first_try_accuracy is not none else '—' }}{% if metrics.first_try_accuracy is not none %}%{% endif %}</strong></article>
+    <article class="stat panel"><span>Exactitud global</span><strong>{{ metrics.global_accuracy if metrics.global_accuracy is not none else '—' }}{% if metrics.global_accuracy is not none %}%{% endif %}</strong></article>
+    <article class="stat panel"><span>Tiempo activo / total</span><strong class="small-value">{{ metrics.active_seconds|duration }} / {{ metrics.elapsed_seconds|duration }}</strong></article>
+  </section>
+
+  {% for group in attempts_by_scene %}
+    <section class="panel">
+      <h2>Reto {{ group.scene_number }}</h2>
+      {% if group.attempts %}<div class="table-wrap"><table>
+        <thead><tr><th>Pregunta</th><th>Intento</th><th>Resultado</th><th>Respuestas</th><th>Hora UTC</th><th>Activo acumulado</th></tr></thead>
+        <tbody>{% for attempt in group.attempts %}<tr>
+          <td>{{ attempt.step_index + 1 }}</td><td>{{ attempt.attempt_number }}</td><td>{{ 'Correcta' if attempt.is_correct else 'Incorrecta' }}</td>
+          <td><code>{{ attempt.answers }}</code></td><td>{{ attempt.submitted_at.isoformat() }}</td><td>{{ attempt.active_seconds_at_submit|duration }}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>{% else %}<p class="muted">Sin intentos.</p>{% endif %}
+    </section>
+  {% endfor %}
+{% endblock %}

@@ -131,7 +131,14 @@ $$
 
 - Fondo: cocina.
 - Sprites: mamá de Tadeo, tarjetas de recetas e ingredientes.
-- Interacciones: campo de ecuación, número de porciones y elección libre de receta.
+- Flujo implementado de 5 etapas:
+    1. Identificar las cantidades conocidas y definir $x$ como el número de porciones.
+    2. Construir $150x+100$ y $100x+300$.
+    3. Igualar las expresiones e interpretar el signo $=$.
+    4. Resolver $x=4$.
+    5. Comprobar 700 g en cada receta y elegir libremente cuál preparar.
+- Interacciones: campos numéricos y algebraicos, selecciones conceptuales y tarjetas de recetas.
+- Navegación: cada etapa debe comprobarse antes de habilitar la siguiente.
 - Formalización: igualdad de dos expresiones con incógnita en ambos miembros.
 - Efecto narrativo: cuarta actividad marcada, 0 minutos ficticios restantes y pantalla “Día completado”.
 

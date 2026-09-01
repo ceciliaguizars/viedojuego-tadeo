@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ application.name }}{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <div><a class="back" href="/admin">← Aplicaciones</a><p class="kicker">Aplicación {{ application.id }}</p><h1>{{ application.name }}</h1></div>
+    <div class="button-row">
+      <a class="button" href="/admin/applications/{{ application.id }}/exports/sessions.csv">Resumen CSV</a>
+      <a class="button" href="/admin/applications/{{ application.id }}/exports/attempts.csv">Intentos CSV</a>
+    </div>
+  </div>
+
+  <section class="stat-grid">
+    <article class="stat panel"><span>Participantes</span><strong>{{ summary.participants }}</strong><small>{{ summary.sessions }} sesiones</small></article>
+    <article class="stat panel"><span>Finalización</span><strong>{{ summary.completion_rate if summary.completion_rate is not none else '—' }}{% if summary.completion_rate is not none %}%{% endif %}</strong><small>sesiones principales</small></article>
+    <article class="stat panel"><span>Correctas al primer intento</span><strong>{{ summary.mean_first_try_accuracy if summary.mean_first_try_accuracy is not none else '—' }}{% if summary.mean_first_try_accuracy is not none %}%{% endif %}</strong><small>promedio principal</small></article>
+    <article class="stat panel"><span>Exactitud global</span><strong>{{ summary.mean_global_accuracy if summary.mean_global_accuracy is not none else '—' }}{% if summary.mean_global_accuracy is not none %}%{% endif %}</strong><small>promedio principal</small></article>
+    <article class="stat panel"><span>Tiempo activo medio</span><strong>{{ summary.mean_active_seconds|duration }}</strong><small>solo completadas</small></article>
+    <article class="stat panel"><span>Duración mediana</span><strong>{{ summary.median_elapsed_seconds|duration }}</strong><small>solo completadas</small></article>
+  </section>
+
+  <div class="two-column">
+    <section class="panel">
+      <h2>Folios anónimos</h2>
+      <form action="/admin/applications/{{ application.id }}/codes" method="post" class="inline-form">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+        <label>Cantidad<input type="number" name="count" value="20" min="1" max="500" required /></label>
+        <button class="primary" type="submit">Generar folios</button>
+      </form>
+      <div class="code-list" aria-label="Folios generados">
+        {% for code in codes %}<span class="code {{ 'used' if code.first_used_at else '' }}">{{ code.code }}</span>{% else %}<p class="muted">Todavía no hay folios.</p>{% endfor %}
+      </div>
+      <p class="legend"><span class="sample used"></span> utilizado <span class="sample"></span> disponible</p>
+    </section>
+
+    <section class="panel">
+      <h2>Dificultad por reto</h2>
+      <div class="table-wrap"><table>
+      <thead><tr><th>Situación</th><th>Sesiones</th><th>Preguntas</th><th>Intentos</th><th>1er intento</th><th>Global</th></tr></thead>
+        <tbody>{% for row in difficulty %}<tr>
+          <td>{{ row.scene_number }}</td><td>{{ row.sessions_attempted }}</td><td>{{ row.questions_attempted }}</td><td>{{ row.attempts }}</td>
+          <td>{{ row.first_try_accuracy if row.first_try_accuracy is not none else '—' }}{% if row.first_try_accuracy is not none %}%{% endif %}</td>
+          <td>{{ row.global_accuracy if row.global_accuracy is not none else '—' }}{% if row.global_accuracy is not none %}%{% endif %}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Resultados individuales</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Folio</th><th>Sesión</th><th>Estado</th><th>Progreso</th><th>Intentos</th><th>1er intento</th><th>Global</th><th>Activo</th><th>Total</th></tr></thead>
+      <tbody>
+        {% for row in session_rows %}<tr>
+          <td><a href="/admin/sessions/{{ row.session.id }}"><strong>{{ row.session.participant_code.code }}</strong></a></td>
+          <td>{{ 'Principal' if row.session.is_primary else 'Repetición ' ~ row.session.sequence }}</td>
+          <td><span class="status-label {{ row.session.status }}">{{ row.session.status }}</span></td>
+          <td>{{ row.metrics.challenges_completed }}/5 · {{ row.metrics.questions_completed }}/21</td><td>{{ row.metrics.attempts_total }}</td>
+          <td>{{ row.metrics.first_try_accuracy if row.metrics.first_try_accuracy is not none else '—' }}{% if row.metrics.first_try_accuracy is not none %}%{% endif %}</td>
+          <td>{{ row.metrics.global_accuracy if row.metrics.global_accuracy is not none else '—' }}{% if row.metrics.global_accuracy is not none %}%{% endif %}</td>
+          <td>{{ row.metrics.active_seconds|duration }}</td><td>{{ row.metrics.elapsed_seconds|duration }}</td>
+        </tr>{% else %}<tr><td colspan="9" class="muted">Ningún folio ha iniciado el juego.</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+
+  <details class="danger-zone panel">
+    <summary>Eliminar esta aplicación y todos sus datos</summary>
+    <p>Esta acción elimina folios, sesiones, respuestas y tiempos. Exporta los CSV antes de continuar.</p>
+    <form action="/admin/applications/{{ application.id }}/delete" method="post" class="inline-form">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+      <label class="grow">Escribe <strong>{{ application.name }}</strong> para confirmar
+        <input name="confirmation" required autocomplete="off" />
+      </label>
+      <button class="danger" type="submit">Eliminar definitivamente</button>
+    </form>
+  </details>
+{% endblock %}

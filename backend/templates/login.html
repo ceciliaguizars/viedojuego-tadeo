@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Acceso administrativo{% endblock %}
+{% block content %}
+  <section class="login-card panel">
+    <p class="kicker">Panel protegido</p>
+    <h1>Estadísticas de aplicación</h1>
+    <p>Ingresa la clave administrativa para crear folios, consultar resultados y exportar los datos.</p>
+    {% if not configured %}
+      <div class="notice warning">El servidor todavía no tiene configurada la variable <code>ADMIN_PASSWORD_HASH</code>.</div>
+    {% endif %}
+    {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+    <form action="/admin/login" method="post" class="stack-form">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+      <label>Contraseña
+        <input type="password" name="password" autocomplete="current-password" required {% if not configured %}disabled{% endif %} />
+      </label>
+      <button class="primary" type="submit" {% if not configured %}disabled{% endif %}>Entrar</button>
+    </form>
+  </section>
+{% endblock %}
+

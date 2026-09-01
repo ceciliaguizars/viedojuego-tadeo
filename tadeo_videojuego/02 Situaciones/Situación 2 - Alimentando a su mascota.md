@@ -104,7 +104,13 @@ Tarea futura: **comprar alimento para el perro el día 2**.
 
 - Fondo: patio.
 - Sprites: perro, bolsa y plato de alimento.
-- Interacciones: selector de símbolo, número de días y día de compra.
+- Flujo implementado de 4 etapas:
+    1. Identificar los 900 g, el consumo diario de 300 g y la cantidad desconocida.
+    2. Calcular 3 días y escribir $300+300+300=900$.
+    3. Elegir un símbolo para la incógnita y explicar qué representa.
+    4. Calcular y agendar la compra para el día 2.
+- Interacciones: campos numéricos y algebraicos, selector de símbolo y opciones de significado.
+- Navegación: cada etapa debe comprobarse antes de habilitar la siguiente.
 - Formalización: definición de incógnita.
 - Efecto narrativo: primera actividad marcada y 90 minutos ficticios restantes.
 

@@ -6,12 +6,14 @@ tags:
   - tadeo
   - videojuego-educativo
   - algebra
-estado: en-desarrollo
+estado: prototipo-implementado
 ---
 
 # El día de Tadeo
 
 Esta bóveda concentra la narrativa, las cinco situaciones didácticas y las decisiones de diseño de la plataforma interactiva.
+
+La versión web implementa el recorrido completo en **21 etapas de preguntas**, con validación contextual desde Python, persistencia en PostgreSQL, estadísticas por folio anónimo, cinco descubrimientos y cierre narrativo.
 
 ## Recorrido principal
 

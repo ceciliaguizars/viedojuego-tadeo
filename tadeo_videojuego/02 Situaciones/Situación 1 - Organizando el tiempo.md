@@ -76,7 +76,12 @@ A la izquierda hay cuatro cantidades de 30 minutos y, al sumarlas, se obtienen 1
 
 - Fondo: habitación de Tadeo.
 - Objeto: reloj o temporizador con 120 minutos.
-- Interacción: campo para completar la cantidad repetida.
+- Flujo implementado de 3 etapas:
+    1. Identificar los 120 minutos y las 4 actividades.
+    2. Calcular los 30 minutos por actividad.
+    3. Interpretar ambos lados de $30+30+30+30=120$ y justificar la igualdad.
+- Interacciones: campos numéricos y selecciones sobre el significado de la igualdad.
+- Navegación: cada etapa debe comprobarse antes de habilitar la siguiente.
 - Formalización tras comprobar: igualdad y equivalencia.
 - Efecto narrativo: se fija un bloque ficticio de 30 minutos por actividad; todavía no se marca una tarea de la agenda.
 

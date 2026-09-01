@@ -1,2 +1,11 @@
 .DS_Store
 tmp/
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+data/*.db
+data/*.sqlite*
+data/rag-index.json
+data/rag-index.json

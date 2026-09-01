@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Asistente RAG{% endblock %}
+{% block content %}
+  <a class="back" href="/admin">← Volver a aplicaciones</a>
+  <div class="page-heading">
+    <div>
+      <p class="kicker">Base de conocimiento</p>
+      <h1>Asistente del proyecto</h1>
+      <p class="muted">Consulta el brief, la narrativa, las situaciones y la documentación técnica.</p>
+    </div>
+  </div>
+
+  {% if not rag_status.ready %}
+    <section class="notice warning">
+      {% if rag_status.reason == 'index_missing' %}
+        Falta generar el índice. Ejecuta <code>python -m scripts.index_rag</code>.
+      {% elif rag_status.reason == 'api_key_missing' %}
+        El índice existe, pero falta configurar <code>OPENAI_API_KEY</code>.
+      {% else %}
+        El índice no se puede leer. Vuelve a generarlo con <code>python -m scripts.index_rag</code>.
+      {% endif %}
+    </section>
+  {% else %}
+    <p class="index-summary">
+      {{ rag_status.documents }} documentos · {{ rag_status.chunks }} fragmentos ·
+      índice {{ rag_status.created_at[:10] }}
+    </p>
+  {% endif %}
+
+  <section class="panel rag-panel">
+    <form action="/admin/rag" method="post" class="stack-form">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}" />
+      <label>Pregunta
+        <textarea name="question" maxlength="1200" rows="4" placeholder="Ej. ¿Qué objetivos didácticos trabaja la situación de la papelería?" required>{{ question or '' }}</textarea>
+      </label>
+      <button class="primary" type="submit" {% if not rag_status.ready %}disabled{% endif %}>Consultar documentos</button>
+    </form>
+  </section>
+
+  {% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+  {% if result %}
+    <section class="panel rag-answer">
+      <p class="kicker">Respuesta</p>
+      <div class="answer-text">{{ result.answer }}</div>
+      <h2>Fuentes recuperadas</h2>
+      <ol class="source-list">
+        {% for source in result.sources %}
+          <li>
+            <strong>{{ source.source }}</strong> · {{ source.heading }}
+            <span>similitud {{ '%.3f'|format(source.score) }}</span>
+            <p>{{ source.excerpt }}{% if source.excerpt|length == 280 %}…{% endif %}</p>
+          </li>
+        {% endfor %}
+      </ol>
+    </section>
+  {% endif %}
+{% endblock %}

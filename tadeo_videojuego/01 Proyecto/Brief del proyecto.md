@@ -30,13 +30,15 @@ El diseño se vincula con el Enfoque Ontosemiótico, el aprendizaje significativ
 
 - Recorrido lineal y guiado.
 - Escenarios como fondos estáticos; personajes y objetos como sprites independientes.
-- Diálogos, selecciones, preguntas y retroalimentación mediante interfaces.
+- Cada situación se divide en preguntas breves que cubren exploración, representación, resolución, comprobación e interpretación.
+- Diálogos, selecciones, campos numéricos y algebraicos, y retroalimentación mediante interfaces.
+- El avance se habilita solamente después de responder correctamente la pregunta actual.
 - Progreso representado por la agenda, no por puntos o recompensas externas.
 - Intervención didáctica acompañada por una hoja de trabajo.
 
 ## Sistema “Mis descubrimientos”
 
-Después de cada respuesta correcta se desbloquea una tarjeta con:
+Al completar la última pregunta de cada situación se desbloquea una tarjeta con:
 
 1. Definición breve.
 2. Ejemplo relacionado con la situación.
@@ -49,6 +51,7 @@ El botón **Mis descubrimientos** debe estar disponible durante toda la experien
 - Evitar mensajes aislados de “correcto” o “incorrecto”.
 - Ante un error, ofrecer una pista relacionada con el significado de los datos.
 - Permitir volver a intentarlo sin pérdida de puntos.
+- Confirmar cada acierto antes de habilitar la siguiente pregunta.
 - Mostrar la formalización matemática al completar el reto.
 
 ## Identidad visual
@@ -67,9 +70,9 @@ El botón **Mis descubrimientos** debe estar disponible durante toda la experien
 
 ## Alcance técnico de la primera versión
 
-HTML, CSS y JavaScript, ejecutables directamente en navegador. Debe permitir completar la historia de principio a fin, validar respuestas, actualizar la agenda, mostrar retroalimentación y desbloquear descubrimientos.
+HTML, CSS y JavaScript, ejecutables directamente en navegador. La primera versión permite completar la historia de principio a fin mediante 21 etapas, validar respuestas, conservar la pregunta actual, actualizar la agenda, mostrar retroalimentación y desbloquear descubrimientos.
 
-Fuera de alcance: movimiento libre, mapas interactivos, combates, puntos, inicio de sesión, base de datos y multijugador.
+Fuera de alcance: movimiento libre, mapas interactivos, combates, puntos, cuentas personales con nombre, correo o contraseña, y multijugador. La base PostgreSQL identifica a cada participante únicamente mediante un folio anónimo.
 
 ## Cierre
 

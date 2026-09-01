@@ -5,8 +5,9 @@
   "description": "Videojuego educativo narrativo para introducir ecuaciones de primer grado.",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/dev-server.mjs --open",
-    "dev:server": "node scripts/dev-server.mjs",
+    "dev": ".venv/bin/python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 4173",
+    "db:migrate": ".venv/bin/python -m alembic upgrade head",
+    "test": ".venv/bin/python -m pytest -q",
     "check": "node --check js/app.js && node --check scripts/dev-server.mjs"
   }
 }
