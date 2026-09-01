@@ -11,19 +11,18 @@
   <body>
     <a class="skip-link" href="#app">Saltar al juego</a>
     <div class="game-shell">
-      <header class="game-bar" aria-label="Estado del juego">
+      <header class="game-bar" aria-label="Estado del juego" hidden>
         <a class="brand" href="./" aria-label="Volver al inicio">
           <span class="brand-mark" aria-hidden="true">T</span>
           <span><strong>El día de Tadeo</strong><small>Una aventura matemática</small></span>
         </a>
         <div class="status-group">
-          <a class="teacher-access" href="/profesor" target="_blank" rel="noopener">Acceso docente</a>
           <div class="time-card" aria-label="Tiempo ficticio restante"><span aria-hidden="true">◷</span><span><strong id="time-value">120</strong> min</span></div>
           <button class="icon-button" id="agenda-button" type="button" aria-haspopup="dialog"><span aria-hidden="true">☑</span>Agenda</button>
           <button class="icon-button discoveries-button" id="discoveries-button" type="button" aria-haspopup="dialog"><span aria-hidden="true">✦</span>Mis descubrimientos <span class="badge" id="discovery-count" aria-label="descubrimientos desbloqueados">0</span></button>
         </div>
       </header>
-      <div class="progress-track" aria-label="Progreso de la historia"><span id="progress-bar"></span></div>
+      <div class="progress-track" aria-label="Progreso de la historia" hidden><span id="progress-bar"></span></div>
       <main id="app" tabindex="-1"></main>
     </div>
 
@@ -31,7 +30,6 @@
       <button class="dialog-close" type="button" data-close-dialog aria-label="Cerrar agenda">×</button>
       <div class="dialog-heading"><span class="dialog-kicker">Plan de la tarde</span><h2 id="agenda-title">La agenda de Tadeo</h2></div>
       <ol class="agenda-list" id="agenda-list"></ol>
-      <p class="agenda-note" id="agenda-note">Cada actividad dispone de 30 minutos.</p>
     </dialog>
 
     <dialog class="discoveries-dialog" id="discoveries-dialog" aria-labelledby="discoveries-title">

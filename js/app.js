@@ -3,10 +3,10 @@ const PENDING_ATTEMPT_KEY = "tadeo-pending-attempt-v1";
 const ACTIVITY_QUEUE_KEY = "tadeo-activity-queue-v1";
 
 const agendaItems = [
-  "Alimentar a su perro",
-  "Ir a la papelería por 5 cuadernos y una caja de colores",
-  "Comprar un regalo para Eloísa",
-  "Ayudar con la cena",
+  "Alimentar a su perro.",
+  "Ir a la papelería.",
+  "Comprar un regalo para Eloísa.",
+  "Ayudar con la cena.",
 ];
 
 const discoveries = [
@@ -628,6 +628,7 @@ const toast = document.querySelector("#toast");
 const defaultState = { currentScene: 0, currentStep: 0, completedScenes: [], unlocked: [], metrics: null };
 let state = { ...defaultState };
 let researchSession = loadJson(SESSION_STORAGE_KEY, null);
+let introPhase = researchSession?.introPhase || (researchSession ? "game" : "home");
 let activityQueue = loadJson(ACTIVITY_QUEUE_KEY, []);
 let activeStartedAt = null;
 let activitySending = false;
@@ -644,6 +645,14 @@ function loadJson(key, fallback) {
 
 const saveResearchSession = () => localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(researchSession));
 const saveActivityQueue = () => localStorage.setItem(ACTIVITY_QUEUE_KEY, JSON.stringify(activityQueue));
+
+const setIntroPhase = (phase) => {
+  introPhase = phase;
+  if (researchSession) {
+    researchSession.introPhase = phase;
+    saveResearchSession();
+  }
+};
 
 const applyServerState = (serverState) => {
   state = {
@@ -701,24 +710,66 @@ const updateChrome = () => {
   }
 };
 
+const renderHome = () => {
+  app.innerHTML = `
+    <section class="screen intro-screen welcome-screen" style="background-image: url('./assets/scenes/habitacion.png')">
+      <div class="welcome-card">
+        <h1>El día de Tadeo</h1>
+        <p>Un videojuego para explorar situaciones matemáticas</p>
+        <button class="primary-button" type="button" data-action="show-access">INICIAR</button>
+      </div>
+    </section>`;
+};
+
 const renderAccess = (error = "") => {
   app.innerHTML = `
-    <section class="screen" style="background-image: url('./assets/scenes/habitacion.png')">
-      <div class="hero-card access-card">
-        <div class="hero-copy">
-          <span class="eyebrow">Una tarde · Cinco descubrimientos</span>
-          <h1>El día de Tadeo</h1>
-          <p>Ingresa el folio anónimo que te entregó el aplicador. Guardaremos tus respuestas, intentos y tiempos para evaluar la actividad; no solicitamos tu nombre ni correo.</p>
+    <section class="screen intro-screen access-screen" style="background-image: url('./assets/scenes/habitacion.png')">
+      <div class="access-panel">
+        <div class="access-copy">
+          <h1>Ingresa tu folio</h1>
           <form id="participant-access-form" class="access-form">
             <label class="field-group"><span class="field-label">Folio de participante</span>
               <input class="text-input code-input" name="code" maxlength="8" autocomplete="off" autocapitalize="characters" required placeholder="Ej. 7KMP4R2A" />
             </label>
-            <p class="feedback" id="access-feedback" role="alert">${error}</p>
-            <button class="primary-button" type="submit">Comenzar <span aria-hidden="true">→</span></button>
+            <p class="feedback" id="access-feedback" role="alert"></p>
+            <button class="primary-button" type="submit">CONTINUAR</button>
           </form>
-          <p class="privacy-note">El folio es seudónimo. El aplicador puede exportar o eliminar los datos desde el panel protegido.</p>
         </div>
-        <div class="hero-character"><img src="./assets/characters/tadeo.png" alt="Tadeo, protagonista del juego" /></div>
+      </div>
+    </section>`;
+  if (error) document.querySelector("#access-feedback").textContent = error;
+};
+
+const renderPresentation = () => {
+  app.innerHTML = `
+    <section class="screen intro-screen presentation-screen" style="background-image: url('./assets/scenes/habitacion.png')">
+      <div class="hero-card presentation-card">
+        <div class="hero-copy dialogue-copy">
+          <p>¡Hola! Soy Tadeo. Hoy tengo varias cosas que hacer y necesito organizarme para poder terminar todo.</p>
+          <p>Para no olvidar nada, voy registrando mis actividades en mi agenda. Vamos a revisar qué tengo pendiente para hoy.</p>
+          <button class="primary-button" type="button" data-action="view-initial-agenda">VER AGENDA</button>
+        </div>
+        <div class="hero-character"><img src="./assets/characters/tadeo.png" alt="Tadeo en su habitación" /></div>
+      </div>
+    </section>`;
+};
+
+const renderInitialAgenda = () => {
+  const items = agendaItems
+    .map((item, index) => `<li><span class="agenda-number" aria-hidden="true">${index + 1}</span><span>${item}</span></li>`)
+    .join("");
+  app.innerHTML = `
+    <section class="screen intro-screen initial-agenda-screen" style="background-image: url('./assets/scenes/habitacion.png')">
+      <div class="initial-agenda-card">
+        <div class="agenda-character">
+          <img src="./assets/characters/tadeo.png" alt="Tadeo revisa su agenda" />
+          <p>Tengo varias cosas por hacer hoy. Será mejor comenzar organizando mi tiempo.</p>
+        </div>
+        <div class="agenda-paper">
+          <h1>La agenda de Tadeo</h1>
+          <ol class="initial-agenda-list">${items}</ol>
+          <button class="primary-button" type="button" data-action="start-game">COMENZAR</button>
+        </div>
       </div>
     </section>`;
 };
@@ -792,7 +843,11 @@ const renderFinish = () => {
 
 const render = () => {
   updateChrome();
-  if (!researchSession) renderAccess();
+  document.body.dataset.view = introPhase;
+  if (!researchSession && introPhase === "access") renderAccess();
+  else if (!researchSession) renderHome();
+  else if (introPhase === "presentation") renderPresentation();
+  else if (introPhase === "agenda") renderInitialAgenda();
   else if (state.currentScene >= scenes.length) renderFinish();
   else renderScene();
   app.focus({ preventScroll: true });
@@ -847,7 +902,7 @@ const startSession = async (code, allowResume = true) => {
       resume_token: previous?.token || null,
     }),
   }, null);
-  researchSession = { id: data.state.session_id, token: data.session_token, code: data.state.participant_code };
+  researchSession = { id: data.state.session_id, token: data.session_token, code: data.state.participant_code, introPhase: "game" };
   saveResearchSession();
   applyServerState(data.state);
   beginActivityTracking();
@@ -876,12 +931,12 @@ document.addEventListener("submit", async (event) => {
     button.textContent = "Validando…";
     try {
       await startSession(code, false);
+      setIntroPhase("presentation");
       render();
-      agendaDialog.showModal();
     } catch (error) {
       feedback.textContent = error.message;
       button.disabled = false;
-      button.textContent = "Comenzar →";
+      button.textContent = "CONTINUAR";
     }
     return;
   }
@@ -947,6 +1002,23 @@ document.addEventListener("click", async (event) => {
   const actionElement = event.target.closest("[data-action]");
   if (!actionElement) return;
   const action = actionElement.dataset.action;
+  if (action === "show-access") {
+    introPhase = "access";
+    render();
+    return;
+  }
+  if (action === "view-initial-agenda") {
+    setIntroPhase("agenda");
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "start-game") {
+    setIntroPhase("game");
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
   if (action === "next-question" || action === "continue") {
     render();
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -999,6 +1071,7 @@ document.querySelectorAll("dialog").forEach((dialog) => {
 const initialize = async () => {
   if (!researchSession?.id || !researchSession?.token) {
     researchSession = null;
+    introPhase = "home";
     render();
     return;
   }
@@ -1013,6 +1086,7 @@ const initialize = async () => {
     localStorage.removeItem(SESSION_STORAGE_KEY);
     researchSession = null;
     state = { ...defaultState };
+    introPhase = "access";
     renderAccess("Tu sesión anterior ya no está disponible. Ingresa nuevamente tu folio.");
   }
 };
