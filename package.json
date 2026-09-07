@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": ".venv/bin/python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 4173",
+    "review:s4": "node scripts/dev-server.mjs --port 4176",
     "db:migrate": ".venv/bin/python -m alembic upgrade head",
     "test": ".venv/bin/python -m pytest -q",
     "check": "node --check js/app.js && node --check scripts/dev-server.mjs"

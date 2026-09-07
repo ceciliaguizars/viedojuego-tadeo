@@ -1,12 +1,24 @@
 const SESSION_STORAGE_KEY = "tadeo-research-session-v1";
 const PENDING_ATTEMPT_KEY = "tadeo-pending-attempt-v1";
 const ACTIVITY_QUEUE_KEY = "tadeo-activity-queue-v1";
+const SITUATION_ONE_PROGRESS_KEY = "tadeo-situation-one-progress-v1";
+const SITUATION_TWO_PROGRESS_KEY = "tadeo-situation-two-progress-v1";
+const SITUATION_THREE_PROGRESS_KEY = "tadeo-situation-three-progress-v1";
+const SITUATION_FOUR_PROGRESS_KEY = "tadeo-situation-four-progress-v1";
+const SITUATION_FIVE_PROGRESS_KEY = "tadeo-situation-five-progress-v1";
 
 const agendaItems = [
   "Alimentar a su perro.",
   "Ir a la papelería.",
   "Comprar un regalo para Eloísa.",
   "Ayudar con la cena.",
+];
+
+const initialAgendaIcons = [
+  "./assets/objects/icono_comida_perro.png",
+  "./assets/objects/icono_papeleria.png",
+  "./assets/objects/icono_regalo.png",
+  "./assets/objects/icono_cena.png",
 ];
 
 const discoveries = [
@@ -37,7 +49,16 @@ const discoveries = [
   },
 ];
 
-const symbols = ["x", "a", "?", "△", "□", "○", "★", "◆"];
+const unknownRepresentations = [
+  { value: "x", image: "./assets/objects/incognita_x.png", label: "Letra x" },
+  { value: "a", image: "./assets/objects/incognita_a.png", label: "Letra a" },
+  { value: "?", image: "./assets/objects/incognita_interrogacion.png", label: "Signo de interrogación" },
+  { value: "△", image: "./assets/objects/incognita_triangulo.png", label: "Triángulo" },
+  { value: "□", image: "./assets/objects/incognita_rectangulo.png", label: "Rectángulo" },
+  { value: "○", image: "./assets/objects/incognita_circulo.png", label: "Círculo" },
+  { value: "★", image: "./assets/objects/incognita_estrella.png", label: "Estrella" },
+  { value: "◆", image: "./assets/objects/incognita_rombo.png", label: "Rombo" },
+];
 
 const imageChoice = (name, value, image, label) => `
   <label class="choice-card">
@@ -45,17 +66,27 @@ const imageChoice = (name, value, image, label) => `
     <span><img src="${image}" alt="" />${label}</span>
   </label>`;
 
-const symbolChoice = (symbol) => `
-  <label class="symbol-choice">
-    <input type="radio" name="symbol" value="${symbol}" />
-    <span>${symbol}</span>
-  </label>`;
+const unknownRepresentationButton = (name, option, selectedValue = "", index = 0) => {
+  const isSelected = option.value === selectedValue;
+  const isTabStop = isSelected || (!selectedValue && index === 0);
+  return `
+  <button class="s2-symbol-button${isSelected ? " selected" : ""}" type="button" role="radio" aria-checked="${isSelected}" aria-label="${option.label}" tabindex="${isTabStop ? "0" : "-1"}" data-s2-symbol="${option.value}" data-symbol-name="${name}">
+    <img src="${option.image}" alt="" />
+  </button>`;
+};
 
 const answerChoice = (name, value, label) => `
   <label class="answer-choice">
     <input type="radio" name="${name}" value="${value}" />
     <span>${label}</span>
   </label>`;
+
+const escapeHtml = (value) => String(value ?? "")
+  .replaceAll("&", "&amp;")
+  .replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;")
+  .replaceAll("'", "&#039;");
 
 const normalizeEquation = (value) =>
   value
@@ -216,7 +247,8 @@ const scenes = [
         form: `
           <fieldset class="field-group">
             <legend>¿Qué símbolo quieres usar para el número de días?</legend>
-            <div class="symbol-grid">${symbols.map(symbolChoice).join("")}</div>
+            <input type="hidden" name="symbol" />
+            <div class="s2-symbol-grid" role="radiogroup">${unknownRepresentations.map((option) => unknownRepresentationButton("symbol", option)).join("")}</div>
           </fieldset>
           <fieldset class="field-group">
             <legend>¿Qué significa el símbolo que elegiste?</legend>
@@ -624,12 +656,25 @@ const discoveriesDialog = document.querySelector("#discoveries-dialog");
 const agendaList = document.querySelector("#agenda-list");
 const discoveriesList = document.querySelector("#discoveries-list");
 const toast = document.querySelector("#toast");
+const situationOneReviewRequested = new URLSearchParams(window.location.search).get("situacion") === "1";
+const situationThreeReviewRequested = new URLSearchParams(window.location.search).get("situacion") === "3";
+const situationFourReviewRequested = new URLSearchParams(window.location.search).get("situacion") === "4";
+const situationFiveReviewRequested = new URLSearchParams(window.location.search).get("situacion") === "5";
 
 const defaultState = { currentScene: 0, currentStep: 0, completedScenes: [], unlocked: [], metrics: null };
 let state = { ...defaultState };
 let researchSession = loadJson(SESSION_STORAGE_KEY, null);
 let introPhase = researchSession?.introPhase || (researchSession ? "game" : "home");
 let activityQueue = loadJson(ACTIVITY_QUEUE_KEY, []);
+let situationOneProgress = { stage: 0, answers: {} };
+let hasSituationOneProgress = false;
+let situationTwoProgress = { stage: 0, answers: {} };
+let situationThreeProgress = { stage: 0, answers: {}, objectiveAttempts: {} };
+let hasSituationThreeProgress = false;
+let situationFourProgress = { stage: 0, answers: {}, objectiveAttempts: {}, selectedGift: "" };
+let hasSituationFourProgress = false;
+let situationFiveProgress = { stage: 0, answers: {}, objectiveAttempts: {}, selectedRecipe: "" };
+let hasSituationFiveProgress = false;
 let activeStartedAt = null;
 let activitySending = false;
 let toastTimer;
@@ -645,6 +690,158 @@ function loadJson(key, fallback) {
 
 const saveResearchSession = () => localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(researchSession));
 const saveActivityQueue = () => localStorage.setItem(ACTIVITY_QUEUE_KEY, JSON.stringify(activityQueue));
+
+const loadSituationOneProgress = () => {
+  const allProgress = loadJson(SITUATION_ONE_PROGRESS_KEY, {});
+  const saved = researchSession?.id ? allProgress[researchSession.id] : null;
+  hasSituationOneProgress = Boolean(saved);
+  const minimumStage = state.currentScene > 0 ? 5 : state.currentStep === 2 ? 3 : state.currentStep === 1 ? 2 : 0;
+  situationOneProgress = {
+    stage: Math.min(7, Math.max(Number(saved?.stage) || 0, minimumStage)),
+    answers: saved?.answers && typeof saved.answers === "object" ? saved.answers : {},
+  };
+};
+
+const saveSituationOneProgress = () => {
+  if (!researchSession?.id) return;
+  const allProgress = loadJson(SITUATION_ONE_PROGRESS_KEY, {});
+  allProgress[researchSession.id] = situationOneProgress;
+  localStorage.setItem(SITUATION_ONE_PROGRESS_KEY, JSON.stringify(allProgress));
+  hasSituationOneProgress = true;
+};
+
+const loadSituationTwoProgress = () => {
+  const allProgress = loadJson(SITUATION_TWO_PROGRESS_KEY, {});
+  const saved = researchSession?.id ? allProgress[researchSession.id] : null;
+  const minimumStage = state.currentScene > 1
+    ? 8
+    : state.currentScene === 1
+      ? [0, 2, 3, 6][state.currentStep] || 0
+      : 0;
+  situationTwoProgress = {
+    stage: Math.min(8, Math.max(Number(saved?.stage) || 0, minimumStage)),
+    answers: saved?.answers && typeof saved.answers === "object" ? saved.answers : {},
+  };
+};
+
+const saveSituationTwoProgress = () => {
+  if (!researchSession?.id) return;
+  const allProgress = loadJson(SITUATION_TWO_PROGRESS_KEY, {});
+  allProgress[researchSession.id] = situationTwoProgress;
+  localStorage.setItem(SITUATION_TWO_PROGRESS_KEY, JSON.stringify(allProgress));
+};
+
+const situationThreeProgressId = () => {
+  if (!researchSession?.id) return null;
+  return `${researchSession.id}:${situationThreeReviewRequested ? "review" : "story"}`;
+};
+
+const loadSituationThreeProgress = () => {
+  const allProgress = loadJson(SITUATION_THREE_PROGRESS_KEY, {});
+  const progressId = situationThreeProgressId();
+  const saved = progressId ? allProgress[progressId] : null;
+  hasSituationThreeProgress = Boolean(saved);
+  situationThreeProgress = {
+    stage: Math.min(9, Math.max(0, Number(saved?.stage) || 0)),
+    answers: saved?.answers && typeof saved.answers === "object" ? saved.answers : {},
+    objectiveAttempts: saved?.objectiveAttempts && typeof saved.objectiveAttempts === "object"
+      ? saved.objectiveAttempts
+      : {},
+  };
+};
+
+const saveSituationThreeProgress = () => {
+  const progressId = situationThreeProgressId();
+  if (!progressId) return;
+  const allProgress = loadJson(SITUATION_THREE_PROGRESS_KEY, {});
+  allProgress[progressId] = situationThreeProgress;
+  localStorage.setItem(SITUATION_THREE_PROGRESS_KEY, JSON.stringify(allProgress));
+  hasSituationThreeProgress = true;
+};
+
+const situationFourProgressId = () => {
+  if (!researchSession?.id) return null;
+  return `${researchSession.id}:${situationFourReviewRequested ? "review" : "story"}`;
+};
+
+const loadSituationFourProgress = () => {
+  const allProgress = loadJson(SITUATION_FOUR_PROGRESS_KEY, {});
+  const progressId = situationFourProgressId();
+  const saved = progressId ? allProgress[progressId] : null;
+  hasSituationFourProgress = Boolean(saved);
+  const answers = saved?.answers && typeof saved.answers === "object" ? saved.answers : {};
+  situationFourProgress = {
+    stage: Math.min(10, Math.max(0, Number(saved?.stage) || 0)),
+    answers,
+    objectiveAttempts: saved?.objectiveAttempts && typeof saved.objectiveAttempts === "object"
+      ? saved.objectiveAttempts
+      : {},
+    selectedGift: String(saved?.selectedGift || answers.s4_regalo_elegido || ""),
+  };
+};
+
+const saveSituationFourProgress = () => {
+  const progressId = situationFourProgressId();
+  if (!progressId) return;
+  const allProgress = loadJson(SITUATION_FOUR_PROGRESS_KEY, {});
+  allProgress[progressId] = situationFourProgress;
+  localStorage.setItem(SITUATION_FOUR_PROGRESS_KEY, JSON.stringify(allProgress));
+  hasSituationFourProgress = true;
+};
+
+const resetSituationFourProgress = () => {
+  situationFourProgress = {
+    stage: 0,
+    answers: {},
+    objectiveAttempts: {},
+    selectedGift: "",
+  };
+  saveSituationFourProgress();
+};
+
+const situationFiveProgressId = () => {
+  if (!researchSession?.id) return null;
+  return `${researchSession.id}:${situationFiveReviewRequested ? "review" : "story"}`;
+};
+
+const loadSituationFiveProgress = () => {
+  const allProgress = loadJson(SITUATION_FIVE_PROGRESS_KEY, {});
+  const progressId = situationFiveProgressId();
+  const saved = progressId ? allProgress[progressId] : null;
+  hasSituationFiveProgress = Boolean(saved);
+  const answers = saved?.answers && typeof saved.answers === "object" ? saved.answers : {};
+  situationFiveProgress = {
+    stage: Math.min(11, Math.max(0, Number(saved?.stage) || 0)),
+    answers,
+    objectiveAttempts: saved?.objectiveAttempts && typeof saved.objectiveAttempts === "object"
+      ? saved.objectiveAttempts
+      : {},
+    selectedRecipe: String(saved?.selectedRecipe || answers.s5_receta_elegida || ""),
+  };
+};
+
+const saveSituationFiveProgress = () => {
+  const progressId = situationFiveProgressId();
+  if (!progressId) return;
+  const allProgress = loadJson(SITUATION_FIVE_PROGRESS_KEY, {});
+  allProgress[progressId] = situationFiveProgress;
+  localStorage.setItem(SITUATION_FIVE_PROGRESS_KEY, JSON.stringify(allProgress));
+  hasSituationFiveProgress = true;
+};
+
+const ensureSituationFiveProgress = () => {
+  if (!hasSituationFiveProgress) saveSituationFiveProgress();
+};
+
+const resetSituationFiveProgress = () => {
+  situationFiveProgress = {
+    stage: 0,
+    answers: {},
+    objectiveAttempts: {},
+    selectedRecipe: "",
+  };
+  saveSituationFiveProgress();
+};
 
 const setIntroPhase = (phase) => {
   introPhase = phase;
@@ -690,8 +887,9 @@ const showToast = (message) => {
 
 const updateChrome = () => {
   const done = agendaCompleted();
+  const visibleDiscoveries = state.unlocked.filter((index) => index !== 3);
   timeValue.textContent = String(Math.max(120 - done * 30, 0));
-  discoveryCount.textContent = String(state.unlocked.length);
+  discoveryCount.textContent = String(visibleDiscoveries.length);
   const scene = scenes[state.currentScene];
   const stepProgress = scene ? state.currentStep / scene.steps.length : 0;
   const storyProgress = state.currentScene >= scenes.length ? 1 : (state.completedScenes.length + stepProgress) / scenes.length;
@@ -700,10 +898,10 @@ const updateChrome = () => {
     .map((item, index) => `<li class="${index < done ? "done" : ""}"><span class="check" aria-hidden="true">${index < done ? "✓" : ""}</span><span>${item}</span></li>`)
     .join("");
 
-  if (!state.unlocked.length) {
+  if (!visibleDiscoveries.length) {
     discoveriesList.innerHTML = '<p class="empty-state">Completa el primer reto para desbloquear tu primera tarjeta.</p>';
   } else {
-    discoveriesList.innerHTML = state.unlocked.map((index) => {
+    discoveriesList.innerHTML = visibleDiscoveries.map((index) => {
       const item = discoveries[index];
       return `<article class="discovery-card"><h3>${item.title}</h3><p>${item.text}</p><code>${item.example}</code></article>`;
     }).join("");
@@ -756,19 +954,23 @@ const renderPresentation = () => {
 
 const renderInitialAgenda = () => {
   const items = agendaItems
-    .map((item, index) => `<li><span class="agenda-number" aria-hidden="true">${index + 1}</span><span>${item}</span></li>`)
+    .map((item, index) => `<li><img class="initial-agenda-icon" src="${initialAgendaIcons[index]}" alt="" /><span>${item}</span></li>`)
     .join("");
   app.innerHTML = `
-    <section class="screen intro-screen initial-agenda-screen" style="background-image: url('./assets/scenes/habitacion.png')">
-      <div class="initial-agenda-card">
-        <div class="agenda-character">
-          <img src="./assets/characters/tadeo.png" alt="Tadeo revisa su agenda" />
-          <p>Tengo varias cosas por hacer hoy. Será mejor comenzar organizando mi tiempo.</p>
-        </div>
-        <div class="agenda-paper">
+    <section class="screen intro-screen initial-agenda-screen s1-game-stage s1-agenda-stage" style="background-image: url('./assets/scenes/habitacion.png')">
+      <img class="s1-stage-character s1-agenda-character" src="./assets/characters/tadeo.png" alt="Tadeo revisa su agenda" />
+      <div class="s1-interface-panel s1-agenda-panel">
+        <span class="s1-panel-kicker">Agenda</span>
+        <p class="s1-dialogue-line">Tengo varias cosas por hacer hoy. Será mejor comenzar organizando mi tiempo.</p>
+        <div class="s1-agenda-content">
           <h1>La agenda de Tadeo</h1>
-          <ol class="initial-agenda-list">${items}</ol>
-          <button class="primary-button" type="button" data-action="start-game">COMENZAR</button>
+          <div class="s1-agenda-book">
+            <img src="./assets/objects/Agenda%20abierta%204%20actividades.png" alt="Agenda abierta de Tadeo" />
+            <ol class="s1-agenda-book-list">${items}</ol>
+          </div>
+          <div class="form-actions">
+            <button class="primary-button" type="button" data-action="start-game">COMENZAR</button>
+          </div>
         </div>
       </div>
     </section>`;
@@ -778,9 +980,1499 @@ const renderLoading = () => {
   app.innerHTML = '<section class="screen loading-screen"><div class="loading-card"><strong>Cargando tu sesión…</strong><span>Estamos recuperando tu progreso.</span></div></section>';
 };
 
+const situationOneForms = [
+  "",
+  `
+    <label class="field-group">
+      <span class="field-label">a) ¿Cuánto tiempo tiene Tadeo en total?</span>
+      <input class="text-input" name="s1_explora_a" autocomplete="off" required />
+    </label>
+    <label class="field-group">
+      <span class="field-label">b) ¿Cuántas actividades tiene que realizar?</span>
+      <input class="text-input" name="s1_explora_b" autocomplete="off" required />
+    </label>
+    <label class="field-group">
+      <span class="field-label">c) Si quiere dedicar el mismo tiempo a cada actividad, ¿cuánto tiempo puede dedicar a cada una?</span>
+      <input class="text-input" name="s1_explora_c" autocomplete="off" required />
+    </label>`,
+  `
+    <p class="field-label">a) Completa los espacios.</p>
+    <div class="equality-builder" aria-label="Completa la igualdad">
+      <input class="text-input" name="s1_igualdad_1" aria-label="Primer número" autocomplete="off" required />
+      <span aria-hidden="true">+</span>
+      <input class="text-input" name="s1_igualdad_2" aria-label="Segundo número" autocomplete="off" required />
+      <span aria-hidden="true">+</span>
+      <input class="text-input" name="s1_igualdad_3" aria-label="Tercer número" autocomplete="off" required />
+      <span aria-hidden="true">+</span>
+      <input class="text-input" name="s1_igualdad_4" aria-label="Cuarto número" autocomplete="off" required />
+      <span aria-hidden="true">= 120</span>
+    </div>`,
+  `
+    <label class="field-group">
+      <span class="field-label">b) ¿Qué representa cada número que escribiste del lado izquierdo?</span>
+      <textarea class="text-input open-response" name="s1_significado_izquierda" required></textarea>
+    </label>
+    <label class="field-group">
+      <span class="field-label">c) ¿Qué representa el número 120 que aparece del lado derecho?</span>
+      <textarea class="text-input open-response" name="s1_significado_derecha" required></textarea>
+    </label>`,
+  `
+    <fieldset class="field-group">
+      <legend>d) ¿La suma del lado izquierdo da la misma cantidad que el número del lado derecho?</legend>
+      <div class="answer-grid two-options">
+        <label class="answer-choice"><input type="radio" name="s1_misma_cantidad" value="Sí" required /><span>Sí</span></label>
+        <label class="answer-choice"><input type="radio" name="s1_misma_cantidad" value="No" required /><span>No</span></label>
+      </div>
+    </fieldset>
+    <label class="field-group">
+      <span class="field-label">e) Explica por qué.</span>
+      <textarea class="text-input open-response" name="s1_justificacion" required></textarea>
+    </label>`,
+];
+
+const situationOneStages = [
+  {
+    title: "Situación 1. Organizando el tiempo",
+    intro: "Tadeo tiene cuatro actividades pendientes y dispone de 120 minutos para realizarlas. Quiere dedicar el mismo tiempo a cada actividad.",
+    question: "¿Cuántos minutos puede dedicar a cada una?",
+  },
+  { title: "Explora", intro: "Responde las siguientes preguntas." },
+  { title: "Representación de la igualdad", intro: "Completa la representación con cuatro números." },
+  { title: "Significados", intro: "Explica con tus propias palabras qué significa cada lado." },
+  { title: "Comparación y justificación", intro: "Compara ambos lados de la igualdad y explica tu respuesta." },
+];
+
+const situationOneHud = (stageIndex) => {
+  const dots = Array.from(
+    { length: 7 },
+    (_, index) => `<span class="s1-hud-dot ${index < stageIndex ? "done" : ""} ${index === stageIndex ? "current" : ""}" aria-hidden="true"></span>`,
+  ).join("");
+  return `
+    <div class="s1-hud" aria-label="Situación 1, estado ${stageIndex + 1} de 7">
+      <span class="s1-hud-title">Situación 1</span>
+      <span class="s1-hud-dots">${dots}</span>
+    </div>`;
+};
+
+const situationOneCompletedEquation = () => {
+  const values = [1, 2, 3, 4].map((index) => situationOneProgress.answers[`s1_igualdad_${index}`]);
+  if (values.some((value) => value === undefined)) return "";
+  const safeValues = values.map(escapeHtml);
+  const accessibleEquation = escapeHtml(`${values.join(" + ")} = 120`);
+  return `
+    <div class="s1-recalled-equation" role="img" aria-label="La suma que completaste: ${accessibleEquation}">
+      <span class="s1-recalled-value">${safeValues[0]}</span><span aria-hidden="true">+</span>
+      <span class="s1-recalled-value">${safeValues[1]}</span><span aria-hidden="true">+</span>
+      <span class="s1-recalled-value">${safeValues[2]}</span><span aria-hidden="true">+</span>
+      <span class="s1-recalled-value">${safeValues[3]}</span><span aria-hidden="true">= 120</span>
+    </div>`;
+};
+
+const renderSituationOneAgenda = () => {
+  const items = agendaItems
+    .map((item, index) => `<li><img class="initial-agenda-icon" src="${initialAgendaIcons[index]}" alt="" /><span>${item}</span></li>`)
+    .join("");
+  app.innerHTML = `
+    <section class="screen situation-one-screen s1-game-stage s1-agenda-stage" style="background-image: url('./assets/scenes/habitacion.png')">
+      ${situationOneHud(6)}
+      <img class="s1-stage-character s1-agenda-character" src="./assets/characters/tadeo.png" alt="Tadeo revisa su agenda" />
+      <div class="s1-interface-panel s1-agenda-panel">
+        <span class="s1-panel-kicker">Agenda</span>
+        <p class="s1-dialogue-line">Ya organicé mi tiempo. Ahora puedo comenzar con la primera actividad.</p>
+        <div class="s1-agenda-content">
+          <h1>La agenda de Tadeo</h1>
+          <div class="s1-agenda-book">
+            <img src="./assets/objects/Agenda%20abierta%204%20actividades.png" alt="Agenda abierta de Tadeo" />
+            <ol class="s1-agenda-book-list">${items}</ol>
+          </div>
+          <p class="next-activity"><strong>Siguiente actividad:</strong> Alimentar a su perro.</p>
+          <div class="form-actions">
+            <button class="primary-button" type="button" data-action="start-s2">Continuar con la primera actividad <span aria-hidden="true">→</span></button>
+            <button class="primary-button" type="button" data-action="s1-restart">Revisar de nuevo la Situación 1</button>
+          </div>
+        </div>
+      </div>
+    </section>`;
+};
+
+const renderSituationOneDiscovery = () => {
+  app.innerHTML = `
+    <section class="screen situation-one-screen s1-game-stage s1-discovery-stage" style="background-image: url('./assets/scenes/habitacion.png')">
+      ${situationOneHud(5)}
+      <img class="s1-stage-character s1-discovery-character" src="./assets/characters/tadeo-celebrando.png" alt="" />
+      <div class="s1-interface-panel s1-discovery-panel">
+        <div class="s1-panel-heading">
+          <span class="s1-panel-kicker">Situación 1 · Habitación</span>
+          <span class="s1-panel-scene">Organizando el tiempo</span>
+        </div>
+        <p class="s1-situation-context">Tadeo terminó de construir y analizar su representación.</p>
+        <span class="s1-discovery-label">✦ Mi descubrimiento</span>
+        <h3>La igualdad</h3>
+        <aside class="discovery-unlocked">
+          <p class="challenge-intro">Una igualdad expresa que las expresiones que aparecen a ambos lados del signo “=” tienen el mismo valor.</p>
+          <div class="equation-card">30 + 30 + 30 + 30 = 120</div>
+        </aside>
+        <button class="primary-button" type="button" data-action="s1-show-agenda">Ver agenda <span aria-hidden="true">→</span></button>
+      </div>
+    </section>`;
+};
+
+const renderSituationOne = () => {
+  const stageIndex = situationOneProgress.stage;
+  progressBar.style.width = `${Math.round(((stageIndex + 1) / 7) * 100)}%`;
+  if (stageIndex === 6) {
+    renderSituationOneAgenda();
+    return;
+  }
+  if (stageIndex === 5) {
+    renderSituationOneDiscovery();
+    return;
+  }
+  const stage = situationOneStages[stageIndex];
+  const contextContent = stageIndex === 0
+    ? `<p class="central-question">${stage.question}</p><button class="primary-button" type="button" data-action="s1-start">Continuar <span aria-hidden="true">→</span></button>`
+    : `<form class="challenge-form" id="challenge-form" data-s1-stage="${stageIndex}" novalidate>
+        ${situationOneForms[stageIndex]}
+        <p class="feedback" id="feedback" role="status"></p>
+        <button class="primary-button" type="submit">Guardar y continuar <span aria-hidden="true">→</span></button>
+      </form>`;
+  app.innerHTML = `
+    <section class="screen situation-one-screen s1-game-stage" style="background-image: url('./assets/scenes/habitacion.png')">
+      ${situationOneHud(stageIndex)}
+      <img class="s1-stage-character s1-thinking-character" src="./assets/characters/tadeo-pensando.png" alt="" />
+      <div class="s1-interface-panel s1-question-panel">
+        <div class="s1-panel-heading">
+          <span class="s1-panel-kicker">Situación 1 · Habitación</span>
+          <span class="s1-panel-scene">Organizando el tiempo</span>
+        </div>
+        <p class="s1-situation-context">Tadeo tiene cuatro actividades pendientes y dispone de 120 minutos para realizarlas.</p>
+        <h3>${stage.title}</h3><p class="challenge-intro">${stage.intro}</p>
+        ${stageIndex === 3 ? situationOneCompletedEquation() : ""}
+        ${contextContent}
+      </div>
+    </section>`;
+};
+
+const situationTwoHud = (stageIndex) => {
+  const dots = Array.from(
+    { length: 9 },
+    (_, index) => `<span class="s1-hud-dot ${index < stageIndex ? "done" : ""} ${index === stageIndex ? "current" : ""}" aria-hidden="true"></span>`,
+  ).join("");
+  return `
+    <div class="s1-hud s2-hud" aria-label="Situación 2, pantalla ${stageIndex + 12} de 20">
+      <span class="s1-hud-title">Situación 2</span>
+      <span class="s1-hud-dots">${dots}</span>
+    </div>`;
+};
+
+const situationTwoObjects = (stageIndex) => {
+  const isNarrative = stageIndex === 0;
+  const isCelebration = stageIndex === 6 || stageIndex === 8;
+  const bagImage = stageIndex >= 2
+    ? "./assets/objects/bolsa_alimento_casi_vacia.png"
+    : "./assets/objects/bolsa_alimento_abierta.png";
+  return `
+    <div class="s2-scene-objects ${isNarrative ? "s2-feeding-sequence" : ""}" aria-label="Tadeo está en el patio con su perro, la bolsa de alimento y el plato">
+      <img class="s2-tadeo" src="./assets/characters/${isCelebration ? "tadeo-celebrando.png" : "tadeo.png"}" alt="" />
+      <img class="s2-dog" src="./assets/characters/perro.png" alt="" />
+      ${isNarrative ? `
+        <img class="s2-food-bag s2-food-bag-closed" src="./assets/objects/bolsa-alimento.png" alt="" />
+        <img class="s2-food-bag s2-food-bag-open" src="./assets/objects/bolsa_alimento_abierta.png" alt="" />
+        <img class="s2-food-portion" src="./assets/objects/porcion_croquetas.png" alt="" />
+        <img class="s2-food-bowl s2-food-bowl-empty" src="./assets/objects/plato_vacio.png" alt="" />
+        <img class="s2-food-bowl s2-food-bowl-full" src="./assets/objects/plato-lleno.png" alt="" />
+      ` : `
+        <img class="s2-food-bag" src="${bagImage}" alt="" />
+        <img class="s2-food-bowl" src="./assets/objects/plato-lleno.png" alt="" />
+      `}
+    </div>`;
+};
+
+const situationTwoPanel = (stageIndex, content, panelClass = "") => `
+  <section class="screen situation-two-screen s1-game-stage s2-game-stage" data-s2-stage="${stageIndex}" style="background-image: url('./assets/scenes/patio.png')">
+    ${situationTwoHud(stageIndex)}
+    ${situationTwoObjects(stageIndex)}
+    <div class="s1-interface-panel s2-interface-panel ${panelClass}">
+      <div class="s1-panel-heading">
+        <span class="s1-panel-kicker">Pantalla ${stageIndex + 12} · Situación 2</span>
+        <span class="s1-panel-scene">El patio</span>
+      </div>
+      ${content}
+    </div>
+  </section>`;
+
+const selectedUnknownRepresentation = () => unknownRepresentations.find(
+  (option) => option.value === situationTwoProgress.answers.s2_representacion_incognita,
+);
+
+const situationTwoSavedAnswer = (name) => escapeHtml(situationTwoProgress.answers[name] || "");
+
+const renderSituationTwoNarrative = () => {
+  app.innerHTML = situationTwoPanel(0, `
+    <p class="s1-situation-context">Primera actividad de la agenda · Alimentar a su perro</p>
+    <h3>Hora de alimentar a su perro</h3>
+    <p class="challenge-intro">Tadeo sale al patio con su perro. Abre una bolsa nueva que contiene <strong>900 g de alimento</strong> y sirve en el plato la porción del día: <strong>300 g</strong>.</p>
+    <div class="s2-story-facts" aria-label="Datos de la historia">
+      <span><img src="./assets/objects/bolsa_alimento_abierta.png" alt="" />Bolsa nueva<br /><strong>900 g</strong></span>
+      <span><img src="./assets/objects/porcion_croquetas.png" alt="" />Porción del día<br /><strong>300 g</strong></span>
+    </div>
+    <p class="s2-dialogue">“Quiero saber cuánto tiempo podré alimentar a mi perro antes de comprar otra bolsa.”</p>
+    <button class="primary-button" type="button" data-action="s2-next">Explorar la situación <span aria-hidden="true">→</span></button>
+  `, "s2-narrative-panel");
+};
+
+const renderSituationTwoExploration = () => {
+  app.innerHTML = situationTwoPanel(1, `
+    <p class="s1-situation-context">Primero reconoce los datos y la pregunta de la historia.</p>
+    <h3>Explora</h3>
+    <form class="challenge-form" id="challenge-form" data-s2-stage="1" novalidate>
+      <label class="field-group">
+        <span class="field-label">a) ¿Qué información conoces y consideras útil para resolver la situación?</span>
+        <textarea class="text-input open-response" name="s2_informacion_conocida" required>${situationTwoSavedAnswer("s2_informacion_conocida")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">b) ¿Qué necesitas averiguar?</span>
+        <textarea class="text-input open-response" name="s2_que_averiguar" required>${situationTwoSavedAnswer("s2_que_averiguar")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">No hay una sola forma de responder. Escribe tus ideas con tus propias palabras.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar y continuar <span aria-hidden="true">→</span></button>
+    </form>`);
+};
+
+const renderSituationTwoDaysAndEquality = () => {
+  app.innerHTML = situationTwoPanel(2, `
+    <p class="s1-situation-context">La bolsa contiene 900 g y cada porción diaria es de 300 g.</p>
+    <h3>Días e igualdad</h3>
+    <form class="challenge-form" id="challenge-form" data-s2-stage="2" novalidate>
+      <label class="field-group">
+        <span class="field-label">¿Cuántos días puede alimentar Tadeo a su perro con la cantidad disponible?</span>
+        <input class="text-input" inputmode="numeric" name="s2_dias_alimento" value="${situationTwoSavedAnswer("s2_dias_alimento")}" autocomplete="off" required />
+      </label>
+      <label class="field-group">
+        <span class="field-label">Representa mediante una igualdad la situación.</span>
+        <textarea class="text-input open-response s2-equation-response" name="s2_igualdad" aria-describedby="s2-equality-help" autocomplete="off" required>${situationTwoSavedAnswer("s2_igualdad")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note" id="s2-equality-help">Construye tu propia igualdad. Conservaremos exactamente lo que escribas.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar y continuar <span aria-hidden="true">→</span></button>
+    </form>`);
+};
+
+const renderSituationTwoUnknown = () => {
+  app.innerHTML = situationTwoPanel(3, `
+    <p class="s1-situation-context">Piensa en lo que sabías antes de resolver el problema.</p>
+    <h3>Cantidad desconocida</h3>
+    <form class="challenge-form" id="challenge-form" data-s2-stage="3" novalidate>
+      <label class="field-group">
+        <span class="field-label">¿Qué cantidad de esta situación no conocíamos al inicio?</span>
+        <textarea class="text-input open-response" name="s2_cantidad_desconocida" required>${situationTwoSavedAnswer("s2_cantidad_desconocida")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Explícalo con tus propias palabras.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar y continuar <span aria-hidden="true">→</span></button>
+    </form>`);
+};
+
+const renderSituationTwoRepresentation = () => {
+  const selectedValue = situationTwoProgress.answers.s2_representacion_incognita || "";
+  const options = unknownRepresentations
+    .map((option, index) => unknownRepresentationButton("s2_representacion_incognita", option, selectedValue, index))
+    .join("");
+  app.innerHTML = situationTwoPanel(4, `
+    <p class="s1-situation-context">Puedes elegir libremente una letra o un símbolo.</p>
+    <h3>Elige una representación</h3>
+    <form class="challenge-form" id="challenge-form" data-s2-stage="4" novalidate>
+      <fieldset class="field-group">
+        <legend>¿Cómo quieres representar la cantidad que no conocíamos?</legend>
+        <input type="hidden" name="s2_representacion_incognita" value="${escapeHtml(selectedValue)}" />
+        <div class="s2-symbol-grid" role="radiogroup" aria-label="Representaciones posibles para la cantidad desconocida">${options}</div>
+      </fieldset>
+      <p class="helper-text s2-open-note">Ninguna opción es mejor que otra. Puedes cambiar tu elección antes de continuar.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar elección <span aria-hidden="true">→</span></button>
+    </form>`, "s2-selector-panel");
+};
+
+const renderSituationTwoMeaning = () => {
+  const selected = selectedUnknownRepresentation();
+  const selectedMarkup = selected
+    ? `<div class="s2-selected-symbol"><span>Tu representación</span><img src="${selected.image}" alt="${selected.label}" /></div>`
+    : "";
+  app.innerHTML = situationTwoPanel(5, `
+    <p class="s1-situation-context">Relaciona tu elección con la historia de Tadeo y su perro.</p>
+    <h3>¿Qué significa tu representación?</h3>
+    ${selectedMarkup}
+    <form class="challenge-form" id="challenge-form" data-s2-stage="5" novalidate>
+      <label class="field-group">
+        <span class="field-label">¿Qué significa en esta situación el símbolo o letra que elegiste?</span>
+        <textarea class="text-input open-response" name="s2_significado_representacion" required>${situationTwoSavedAnswer("s2_significado_representacion")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Escribe tu explicación con tus propias palabras.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar y continuar <span aria-hidden="true">→</span></button>
+    </form>`);
+};
+
+const renderSituationTwoDiscovery = () => {
+  const selected = selectedUnknownRepresentation();
+  const connection = selected
+    ? `<span class="s2-discovery-symbol"><img src="${selected.image}" alt="${selected.label}" />Así representaste la cantidad que no conocías al inicio.</span>`
+    : "";
+  app.innerHTML = situationTwoPanel(6, `
+    <p class="s1-situation-context">Ahora podemos ponerle nombre a la idea que acabas de usar.</p>
+    <span class="s1-discovery-label">✦ Mi descubrimiento</span>
+    <h3>La incógnita</h3>
+    <aside class="discovery-unlocked s2-discovery-card">
+      <img class="s2-discovery-card-art" src="./assets/objects/tarjeta_descubrimiento.png" alt="" />
+      <div class="s2-discovery-card-copy">
+        ${connection}
+        <p class="challenge-intro">Una <strong>incógnita</strong> es una cantidad cuyo valor no conocemos y que podemos representar mediante una letra o símbolo.</p>
+        <p>Lo importante es explicar con claridad qué cantidad representa. No tiene que ser siempre la letra x.</p>
+      </div>
+    </aside>
+    <button class="primary-button" type="button" data-action="s2-next">Continuar <span aria-hidden="true">→</span></button>
+  `, "s1-discovery-panel");
+};
+
+const renderSituationTwoPurchase = () => {
+  app.innerHTML = situationTwoPanel(7, `
+    <p class="s1-situation-context">La bolsa alcanzará para ${escapeHtml(situationTwoProgress.answers.s2_dias_alimento || "3")} días.</p>
+    <h3>Compra futura</h3>
+    <p class="challenge-intro">Tadeo quiere comprar más alimento <strong>un día antes de que se termine</strong>, para que su perro nunca se quede sin comida.</p>
+    <form class="challenge-form" id="challenge-form" data-s2-stage="7" novalidate>
+      <label class="field-group">
+        <span class="field-label">¿En qué día debe agendar la compra de alimento?</span>
+        <input class="text-input" inputmode="numeric" name="s2_dia_comprar_alimento" value="${situationTwoSavedAnswer("s2_dia_comprar_alimento")}" autocomplete="off" required />
+      </label>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Registrar compra futura <span aria-hidden="true">→</span></button>
+    </form>`);
+};
+
+const renderSituationTwoAgenda = () => {
+  const items = agendaItems.map((item, index) => `
+    <li class="${index === 0 ? "s2-agenda-done" : "s2-agenda-pending"}">
+      <img class="initial-agenda-icon" src="${initialAgendaIcons[index]}" alt="" />
+      <span class="s2-agenda-task">${item}<small class="s2-agenda-status">${index === 0 ? "✓ Completada" : "Pendiente"}</small></span>
+    </li>`).join("");
+  app.innerHTML = situationTwoPanel(8, `
+    <span class="s1-panel-kicker">Agenda actualizada</span>
+    <p class="s1-dialogue-line">¡Listo! Alimenté a mi perro y también anoté cuándo comprar más alimento.</p>
+    <h1>La agenda de Tadeo</h1>
+    <div class="s1-agenda-book s2-final-agenda">
+      <img src="./assets/objects/Agenda%20abierta%204%20actividades.png" alt="Agenda abierta de Tadeo con la primera actividad completada" />
+      <ol class="s1-agenda-book-list">${items}</ol>
+    </div>
+    <aside class="s2-reminder">
+      <img src="./assets/objects/bolsa_alimento_casi_vacia.png" alt="" />
+      <p><strong>Pendiente futuro</strong>Comprar alimento para el perro el día ${escapeHtml(situationTwoProgress.answers.s2_dia_comprar_alimento || "2")}.</p>
+    </aside>
+    <p class="next-activity"><strong>Siguiente actividad:</strong> Ir a la papelería.</p>
+  `, "s1-agenda-panel s2-agenda-panel");
+};
+
+const renderSituationTwo = () => {
+  const stageIndex = situationTwoProgress.stage;
+  progressBar.style.width = `${Math.round(((stageIndex + 1) / 9) * 100)}%`;
+  const renderers = [
+    renderSituationTwoNarrative,
+    renderSituationTwoExploration,
+    renderSituationTwoDaysAndEquality,
+    renderSituationTwoUnknown,
+    renderSituationTwoRepresentation,
+    renderSituationTwoMeaning,
+    renderSituationTwoDiscovery,
+    renderSituationTwoPurchase,
+    renderSituationTwoAgenda,
+  ];
+  renderers[stageIndex]();
+};
+
+const situationThreeHud = (stageIndex) => {
+  const dots = Array.from(
+    { length: 10 },
+    (_, index) => `<span class="s1-hud-dot ${index < stageIndex ? "done" : ""} ${index === stageIndex ? "current" : ""}" aria-hidden="true"></span>`,
+  ).join("");
+  return `
+    <div class="s1-hud s3-hud" aria-label="Situación 3, pantalla ${stageIndex + 21} de 30">
+      <span class="s1-hud-title">Situación 3</span>
+      <span class="s1-hud-dots">${dots}</span>
+    </div>`;
+};
+
+const situationThreeObjects = (stageIndex) => `
+  <div class="s3-scene-objects" aria-hidden="true">
+    <img class="s3-tadeo" src="./assets/characters/${stageIndex === 9 ? "tadeo-celebrando.png" : "tadeo.png"}" alt="" />
+    <img class="s3-clerk" src="./assets/characters/encargado-papeleria.png" alt="" />
+    <div class="s3-product-row">
+      <figure><img src="./assets/objects/cuaderno-a.png" alt="" /><figcaption>A · $30</figcaption></figure>
+      <figure><img src="./assets/objects/cuaderno-b.png" alt="" /><figcaption>B · $35</figcaption></figure>
+      <figure><img src="./assets/objects/cuaderno-c.png" alt="" /><figcaption>C · $40</figcaption></figure>
+      <figure><img src="./assets/objects/colores.png" alt="" /><figcaption>Colores · $45</figcaption></figure>
+    </div>
+  </div>`;
+
+const situationThreePanel = (stageIndex, content, panelClass = "") => `
+  <section class="screen situation-three-screen s1-game-stage s3-game-stage" data-s3-stage="${stageIndex}" style="background-image: url('./assets/scenes/papeleria.png')">
+    ${situationThreeHud(stageIndex)}
+    ${situationThreeObjects(stageIndex)}
+    <div class="s1-interface-panel s3-interface-panel ${panelClass}">
+      <div class="s3-panel-utility">
+        <div class="s1-panel-heading">
+          <span class="s1-panel-kicker">Pantalla ${stageIndex + 21} · Situación 3</span>
+          <span class="s1-panel-scene">La papelería</span>
+        </div>
+        <button class="secondary-button s3-home-button" type="button" data-action="s3-return-home">Regresar al inicio</button>
+      </div>
+      ${content}
+    </div>
+  </section>`;
+
+const situationThreeSavedAnswer = (name) => escapeHtml(situationThreeProgress.answers[name] || "");
+
+const selectedSituationThreeRepresentation = () => unknownRepresentations.find(
+  (option) => option.value === situationThreeProgress.answers.s3_representacion_incognita,
+);
+
+const situationThreeSelectedRepresentationMarkup = () => {
+  const selected = selectedSituationThreeRepresentation();
+  if (!selected) return "";
+  return `<div class="s2-selected-symbol s3-selected-symbol"><span>Tu representación</span><img src="${selected.image}" alt="${selected.label}" /></div>`;
+};
+
+const situationThreeAttemptList = (name) => {
+  const attempts = situationThreeProgress.objectiveAttempts[name];
+  return Array.isArray(attempts) ? attempts : [];
+};
+
+const situationThreeAttemptFeedback = (name, firstHint, secondHint) => {
+  const attempts = situationThreeAttemptList(name);
+  if (!attempts.length || attempts.some((attempt) => attempt.correct)) return "";
+  const message = attempts.length >= 2 ? secondHint : firstHint;
+  return `<p class="feedback" id="feedback" role="status">${message}</p>`;
+};
+
+const renderSituationThreeNarrative = () => {
+  app.innerHTML = situationThreePanel(0, `
+    <p class="s1-situation-context">Segunda actividad de la agenda · Ir a la papelería</p>
+    <h3>Una compra exacta</h3>
+    <p class="challenge-intro">Tadeo entra a la papelería. Necesita comprar <strong>5 cuadernos iguales</strong> y <strong>una caja de colores que cuesta $45</strong>. Tiene <strong>$195</strong> y debe gastarlos exactamente.</p>
+    <div class="s3-story-facts" aria-label="Opciones disponibles">
+      <span><img src="./assets/objects/cuaderno-a.png" alt="" /><strong>Cuaderno A</strong>$30 cada uno</span>
+      <span><img src="./assets/objects/cuaderno-b.png" alt="" /><strong>Cuaderno B</strong>$35 cada uno</span>
+      <span><img src="./assets/objects/cuaderno-c.png" alt="" /><strong>Cuaderno C</strong>$40 cada uno</span>
+      <span><img src="./assets/objects/colores.png" alt="" /><strong>Caja de colores</strong>$45</span>
+    </div>
+    <p class="s2-dialogue">“Necesito descubrir qué precio debe tener cada cuaderno para que el dinero alcance exactamente.”</p>
+    <button class="primary-button" type="button" data-action="s3-next">Explorar la compra <span aria-hidden="true">→</span></button>
+  `, "s3-narrative-panel");
+};
+
+const renderSituationThreeExploration = () => {
+  app.innerHTML = situationThreePanel(1, `
+    <p class="s1-situation-context">Observa la compra y distingue lo que ya sabes de lo que necesitas averiguar.</p>
+    <h3>Explora</h3>
+    <aside class="s3-purchase-summary" aria-label="Recordatorio de la situación">
+      <p>Tadeo necesita <strong>5 cuadernos iguales</strong> y una <strong>caja de colores de $45</strong>. Tiene <strong>$195</strong> para gastar exactamente.</p>
+      <div class="s3-summary-options">
+        <span><strong>A</strong> $30</span>
+        <span><strong>B</strong> $35</span>
+        <span><strong>C</strong> $40</span>
+      </div>
+    </aside>
+    <form class="challenge-form" id="challenge-form" data-s3-stage="1" novalidate>
+      <label class="field-group">
+        <span class="field-label">a) ¿Qué cantidades conoces en esta situación?</span>
+        <textarea class="text-input open-response" name="s3_cantidades_conocidas" required>${situationThreeSavedAnswer("s3_cantidades_conocidas")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">b) ¿Qué cantidad necesitas encontrar?</span>
+        <textarea class="text-input open-response" name="s3_cantidad_encontrar" required>${situationThreeSavedAnswer("s3_cantidad_encontrar")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">c) ¿Cuál es la cantidad desconocida?</span>
+        <textarea class="text-input open-response" name="s3_incognita" required>${situationThreeSavedAnswer("s3_incognita")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Escribe tus ideas con tus propias palabras. No hay una única forma de expresarlas.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar y continuar <span aria-hidden="true">→</span></button>
+    </form>`);
+};
+
+const renderSituationThreeRepresentation = () => {
+  const selectedValue = situationThreeProgress.answers.s3_representacion_incognita || "";
+  const options = unknownRepresentations
+    .map((option, index) => unknownRepresentationButton("s3_representacion_incognita", option, selectedValue, index))
+    .join("");
+  app.innerHTML = situationThreePanel(2, `
+    <p class="s1-situation-context">El precio de cada cuaderno todavía es desconocido. Puedes representarlo con una letra o un símbolo.</p>
+    <h3>Elige una representación</h3>
+    <form class="challenge-form" id="challenge-form" data-s3-stage="2" novalidate>
+      <fieldset class="field-group">
+        <legend>¿Cómo quieres representar el precio desconocido de un cuaderno?</legend>
+        <input type="hidden" name="s3_representacion_incognita" value="${escapeHtml(selectedValue)}" />
+        <div class="s2-symbol-grid" role="radiogroup" aria-label="Representaciones posibles para el precio desconocido">${options}</div>
+      </fieldset>
+      <p class="helper-text s2-open-note">Cualquiera de estas representaciones es válida. Puedes cambiarla antes de continuar.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar elección <span aria-hidden="true">→</span></button>
+    </form>`, "s2-selector-panel");
+};
+
+const renderSituationThreeFiveNotebooks = () => {
+  app.innerHTML = situationThreePanel(3, `
+    <p class="s1-situation-context">Los cinco cuadernos deben ser iguales y tener el mismo precio desconocido.</p>
+    <h3>Representa los cinco cuadernos</h3>
+    ${situationThreeSelectedRepresentationMarkup()}
+    <form class="challenge-form" id="challenge-form" data-s3-stage="3" novalidate>
+      <label class="field-group">
+        <span class="field-label">¿Cómo representarías el costo de los cinco cuadernos iguales?</span>
+        <textarea class="text-input open-response s3-math-response" name="s3_cinco_cuadernos" autocomplete="off" required>${situationThreeSavedAnswer("s3_cinco_cuadernos")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Construye tu propia representación. Conservaremos exactamente lo que escribas.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar y continuar <span aria-hidden="true">→</span></button>
+    </form>`);
+};
+
+const renderSituationThreeEquality = () => {
+  app.innerHTML = situationThreePanel(4, `
+    <p class="s1-situation-context">Ahora reúne el costo de los cinco cuadernos, los $45 de los colores y los $195 disponibles.</p>
+    <h3>Construye la igualdad</h3>
+    <div class="s3-data-chips" aria-label="Datos para construir la igualdad">
+      <span>5 cuadernos iguales</span><span>Colores: $45</span><span>Total: $195</span>
+    </div>
+    <form class="challenge-form" id="challenge-form" data-s3-stage="4" novalidate>
+      <label class="field-group">
+        <span class="field-label">Escribe una igualdad que represente la compra completa.</span>
+        <textarea class="text-input open-response s3-math-response" name="s3_igualdad_compra" autocomplete="off" required>${situationThreeSavedAnswer("s3_igualdad_compra")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">La igualdad debe ser tu construcción. No tiene que seguir una única escritura.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar y continuar <span aria-hidden="true">→</span></button>
+    </form>`);
+};
+
+const renderSituationThreeBriefRepresentation = () => {
+  app.innerHTML = situationThreePanel(5, `
+    <p class="s1-situation-context">Los cinco cuadernos tienen el mismo precio, por eso aparece una misma cantidad varias veces.</p>
+    <h3>De la suma a la multiplicación</h3>
+    <div class="s3-repeated-sum" role="img" aria-label="a más a más a más a más a puede representarse como cinco a">
+      <span>a + a + a + a + a</span><span aria-hidden="true">→</span><strong>5a</strong>
+    </div>
+    <p class="challenge-intro">Una suma en la que se repite la misma cantidad puede expresarse de manera más breve mediante una multiplicación. Relaciona esta idea con los cinco cuadernos iguales.</p>
+    <form class="challenge-form" id="challenge-form" data-s3-stage="5" novalidate>
+      <label class="field-group">
+        <span class="field-label">Escribe una representación breve de la situación.</span>
+        <textarea class="text-input open-response s3-math-response" name="s3_representacion_breve" autocomplete="off" required>${situationThreeSavedAnswer("s3_representacion_breve")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Escribe tu propia representación; todavía no necesitas resolverla.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar y continuar <span aria-hidden="true">→</span></button>
+    </form>`);
+};
+
+const renderSituationThreeDiscovery = () => {
+  app.innerHTML = situationThreePanel(6, `
+    <p class="s1-situation-context">Ya construiste una igualdad para relacionar la cantidad desconocida con el total de la compra.</p>
+    <span class="s1-discovery-label">✦ Mi descubrimiento</span>
+    <h3>La ecuación</h3>
+    <aside class="discovery-unlocked s2-discovery-card">
+      <img class="s2-discovery-card-art" src="./assets/objects/tarjeta_descubrimiento.png" alt="" />
+      <div class="s2-discovery-card-copy">
+        <p class="challenge-intro">Una <strong>ecuación</strong> es una igualdad en la que aparece una cantidad desconocida.</p>
+        <div class="equation-card">5x + 45 = 195</div>
+        <p>En esta ecuación, <strong>x</strong> representa el precio desconocido de un cuaderno.</p>
+      </div>
+    </aside>
+    <button class="primary-button" type="button" data-action="s3-next">Resolver la ecuación <span aria-hidden="true">→</span></button>
+  `, "s1-discovery-panel s3-discovery-panel");
+};
+
+const renderSituationThreeSolve = () => {
+  const attempts = situationThreeAttemptList("s3_resolver");
+  const exhausted = attempts.length >= 2 && !attempts.some((attempt) => attempt.correct);
+  const feedback = situationThreeAttemptFeedback(
+    "s3_resolver",
+    "Primer intento guardado. Pista: retira primero los $45 de los colores y reparte lo que queda entre los cinco cuadernos.",
+    "Tus dos intentos quedaron guardados. El valor y el cuaderno elegidos no permiten usar exactamente $195. Puedes continuar para revisar la sustitución.",
+  );
+  app.innerHTML = situationThreePanel(7, `
+    <p class="s1-situation-context">Usa la ecuación que acabas de reconocer para encontrar el precio de un cuaderno.</p>
+    <h3>Resuelve y elige</h3>
+    <div class="equation-card">5x + 45 = 195</div>
+    <form class="challenge-form" id="challenge-form" data-s3-stage="7" novalidate>
+      <label class="field-group">
+        <span class="field-label">¿Cuánto vale x?</span>
+        <input class="text-input" inputmode="numeric" name="s3_valor_x" value="${situationThreeSavedAnswer("s3_valor_x")}" autocomplete="off" required />
+      </label>
+      <fieldset class="field-group">
+        <legend>Elige el cuaderno que corresponde al valor obtenido.</legend>
+        <div class="choice-grid s3-notebook-choices">
+          <label class="choice-card"><input type="radio" name="s3_cuaderno_elegido" value="A" ${situationThreeProgress.answers.s3_cuaderno_elegido === "A" ? "checked" : ""} /><span><img src="./assets/objects/cuaderno-a.png" alt="" />Cuaderno A · $30</span></label>
+          <label class="choice-card"><input type="radio" name="s3_cuaderno_elegido" value="B" ${situationThreeProgress.answers.s3_cuaderno_elegido === "B" ? "checked" : ""} /><span><img src="./assets/objects/cuaderno-b.png" alt="" />Cuaderno B · $35</span></label>
+          <label class="choice-card"><input type="radio" name="s3_cuaderno_elegido" value="C" ${situationThreeProgress.answers.s3_cuaderno_elegido === "C" ? "checked" : ""} /><span><img src="./assets/objects/cuaderno-c.png" alt="" />Cuaderno C · $40</span></label>
+        </div>
+      </fieldset>
+      ${feedback || '<p class="feedback" id="feedback" role="status"></p>'}
+      ${exhausted
+        ? '<button class="primary-button" type="button" data-action="s3-continue-after-attempts">Continuar con mi respuesta <span aria-hidden="true">→</span></button>'
+        : `<button class="primary-button" type="submit">${attempts.length ? "Segundo intento" : "Comprobar y continuar"} <span aria-hidden="true">→</span></button>`}
+    </form>`);
+};
+
+const renderSituationThreeCheck = () => {
+  const attempts = situationThreeAttemptList("s3_comprobacion");
+  const exhausted = attempts.length >= 2 && !attempts.some((attempt) => attempt.correct);
+  const feedback = situationThreeAttemptFeedback(
+    "s3_comprobacion",
+    "Primer intento guardado. Pista: calcula el lado izquierdo de tu sustitución y compáralo con $195.",
+    "Tus dos intentos quedaron guardados. Puedes continuar; tu sustitución y tu respuesta se conservan exactamente como las escribiste.",
+  );
+  app.innerHTML = situationThreePanel(8, `
+    <p class="s1-situation-context">Sustituye el valor que encontraste y comprueba si ambos lados conservan el mismo valor.</p>
+    <h3>Sustituye y comprueba</h3>
+    <div class="equation-card">5x + 45 = 195</div>
+    <form class="challenge-form" id="challenge-form" data-s3-stage="8" novalidate>
+      <label class="field-group">
+        <span class="field-label">Sustituye el valor encontrado en la ecuación.</span>
+        <textarea class="text-input open-response s3-math-response" name="s3_sustitucion" autocomplete="off" required>${situationThreeSavedAnswer("s3_sustitucion")}</textarea>
+      </label>
+      <fieldset class="field-group">
+        <legend>¿Se mantiene la igualdad?</legend>
+        <div class="answer-grid two-options">
+          <label class="answer-choice"><input type="radio" name="s3_se_mantiene_igualdad" value="Sí" ${situationThreeProgress.answers.s3_se_mantiene_igualdad === "Sí" ? "checked" : ""} /><span>Sí</span></label>
+          <label class="answer-choice"><input type="radio" name="s3_se_mantiene_igualdad" value="No" ${situationThreeProgress.answers.s3_se_mantiene_igualdad === "No" ? "checked" : ""} /><span>No</span></label>
+        </div>
+      </fieldset>
+      ${feedback || '<p class="feedback" id="feedback" role="status"></p>'}
+      ${exhausted
+        ? '<button class="primary-button" type="button" data-action="s3-continue-after-attempts">Continuar con mi respuesta <span aria-hidden="true">→</span></button>'
+        : `<button class="primary-button" type="submit">${attempts.length ? "Segundo intento" : "Comprobar y continuar"} <span aria-hidden="true">→</span></button>`}
+    </form>`);
+};
+
+const renderSituationThreeAgenda = () => {
+  const items = agendaItems.map((item, index) => `
+    <li class="${index < 2 ? "s2-agenda-done" : "s2-agenda-pending"}">
+      <img class="initial-agenda-icon" src="${initialAgendaIcons[index]}" alt="" />
+      <span class="s2-agenda-task">${item}<small class="s2-agenda-status">${index < 2 ? "✓ Completada" : "Pendiente"}</small></span>
+    </li>`).join("");
+  const reminderDay = escapeHtml(situationTwoProgress.answers.s2_dia_comprar_alimento || "2");
+  app.innerHTML = situationThreePanel(9, `
+    <span class="s1-panel-kicker">Agenda actualizada</span>
+    <p class="s1-dialogue-line">¡Listo! Tadeo encontró el cuaderno que necesitaba y terminó su compra en la papelería.</p>
+    <h1>La agenda de Tadeo</h1>
+    <div class="s1-agenda-book s2-final-agenda">
+      <img src="./assets/objects/Agenda%20abierta%204%20actividades.png" alt="Agenda abierta de Tadeo con las dos primeras actividades completadas" />
+      <ol class="s1-agenda-book-list">${items}</ol>
+    </div>
+    <aside class="s2-reminder">
+      <img src="./assets/objects/bolsa_alimento_casi_vacia.png" alt="" />
+      <p><strong>Pendiente futuro</strong>Comprar alimento para el perro el día ${reminderDay}.</p>
+    </aside>
+    <p class="next-activity"><strong>Siguiente actividad:</strong> Comprar un regalo para Eloísa.</p>
+    ${situationThreeReviewRequested ? "" : '<button class="primary-button" type="button" data-action="start-s4">CONTINUAR <span aria-hidden="true">→</span></button>'}
+  `, "s1-agenda-panel s2-agenda-panel s3-agenda-panel");
+};
+
+const renderSituationThree = () => {
+  const stageIndex = situationThreeProgress.stage;
+  progressBar.style.width = `${Math.round(((stageIndex + 1) / 10) * 100)}%`;
+  const renderers = [
+    renderSituationThreeNarrative,
+    renderSituationThreeExploration,
+    renderSituationThreeRepresentation,
+    renderSituationThreeFiveNotebooks,
+    renderSituationThreeEquality,
+    renderSituationThreeBriefRepresentation,
+    renderSituationThreeDiscovery,
+    renderSituationThreeSolve,
+    renderSituationThreeCheck,
+    renderSituationThreeAgenda,
+  ];
+  renderers[stageIndex]();
+};
+
+const situationFourGifts = [
+  { value: "peluche", label: "Peluche", image: "./assets/objects/regalo-peluche.png" },
+  { value: "caja", label: "Caja sorpresa", image: "./assets/objects/regalo-caja.png" },
+  { value: "lampara", label: "Lámpara", image: "./assets/objects/regalo-lampara.png" },
+];
+
+const situationFourHud = (stageIndex) => {
+  const dots = Array.from(
+    { length: 11 },
+    (_, index) => `<span class="s1-hud-dot ${index < stageIndex ? "done" : ""} ${index === stageIndex ? "current" : ""}" aria-hidden="true"></span>`,
+  ).join("");
+  return `
+    <div class="s1-hud s4-hud" aria-label="Situación 4, pantalla ${stageIndex + 31} de 41">
+      <span class="s1-hud-title">Situación 4</span>
+      <span class="s1-hud-dots">${dots}</span>
+    </div>`;
+};
+
+const situationFourObjects = (stageIndex) => {
+  if (stageIndex === 0) {
+    return `
+      <div class="s4-scene-objects" aria-hidden="true">
+        <img class="s4-tadeo" src="./assets/characters/tadeo.png" alt="" />
+        <img class="s4-clerk" src="./assets/characters/encargada-regalos.png" alt="" />
+      </div>`;
+  }
+  return `
+    <div class="s4-scene-objects" aria-hidden="true">
+      <img class="s4-tadeo ${stageIndex === 10 ? "s4-tadeo-finished" : ""}" src="./assets/characters/${stageIndex === 10 ? "tadeo-celebrando.png" : "tadeo-pensando.png"}" alt="" />
+    </div>`;
+};
+
+const situationFourPanel = (stageIndex, content, panelClass = "") => {
+  const atStore = stageIndex === 0;
+  const background = atStore ? "./assets/scenes/regalos.png" : "./assets/scenes/habitacion.png";
+  return `
+    <section class="screen situation-four-screen s1-game-stage s4-game-stage ${atStore ? "s4-store-stage" : "s4-home-stage"}" data-s4-screen="${stageIndex}" style="background-image: url('${background}')">
+      ${situationFourHud(stageIndex)}
+      ${situationFourObjects(stageIndex)}
+      <div class="s1-interface-panel s4-interface-panel ${panelClass}">
+        <div class="s3-panel-utility">
+          <div class="s1-panel-heading">
+            <span class="s1-panel-kicker">Pantalla ${stageIndex + 31} · Situación 4</span>
+            <span class="s1-panel-scene">${atStore ? "Tienda de regalos" : "Habitación de Tadeo"}</span>
+          </div>
+          <button class="secondary-button s3-home-button" type="button" data-action="s4-return-home">Regresar al inicio</button>
+        </div>
+        ${content}
+      </div>
+    </section>`;
+};
+
+const situationFourSavedAnswer = (name) => escapeHtml(situationFourProgress.answers[name] || "");
+
+const selectedSituationFourGift = () => situationFourGifts.find(
+  (gift) => gift.value === (situationFourProgress.selectedGift || situationFourProgress.answers.s4_regalo_elegido),
+);
+
+const situationFourGiftReminder = () => {
+  const gift = selectedSituationFourGift();
+  if (!gift) return "el regalo que eligió";
+  return `<span class="s4-inline-gift"><img src="${gift.image}" alt="" />${gift.label}</span>`;
+};
+
+const situationFourAttemptList = (name) => {
+  const attempts = situationFourProgress.objectiveAttempts[name];
+  return Array.isArray(attempts) ? attempts : [];
+};
+
+const situationFourAttemptFeedback = (name, firstHint, secondHint) => {
+  const attempts = situationFourAttemptList(name);
+  if (!attempts.length || attempts.some((attempt) => attempt.correct)) return "";
+  return `<p class="feedback" id="feedback" role="status">${attempts.length >= 2 ? secondHint : firstHint}</p>`;
+};
+
+const situationFourObjectiveControls = (name, firstLabel = "Comprobar y continuar") => {
+  const attempts = situationFourAttemptList(name);
+  const exhausted = attempts.length >= 2 && !attempts.some((attempt) => attempt.correct);
+  if (exhausted) {
+    return '<button class="primary-button" type="button" data-action="s4-continue-after-attempts">Continuar con mis respuestas <span aria-hidden="true">→</span></button>';
+  }
+  return `<button class="primary-button" type="submit">${attempts.length ? "Segundo intento" : firstLabel} <span aria-hidden="true">→</span></button>`;
+};
+
+const renderSituationFourGift = () => {
+  const selected = situationFourProgress.selectedGift || situationFourProgress.answers.s4_regalo_elegido || "";
+  const choices = situationFourGifts.map((gift) => `
+    <label class="choice-card s4-gift-choice">
+      <input type="radio" name="s4_regalo_elegido" value="${gift.value}" ${selected === gift.value ? "checked" : ""} />
+      <span><img src="${gift.image}" alt="" /><strong>${gift.label}</strong><small>$180</small></span>
+    </label>`).join("");
+  app.innerHTML = situationFourPanel(0, `
+    <p class="s1-situation-context">Tercera actividad de la agenda · Comprar un regalo para Eloísa</p>
+    <h3>Elige un regalo</h3>
+    <p class="challenge-intro">Tadeo llegó a la tienda. Puede escoger el regalo que más le guste para Eloísa. <strong>Todos cuestan $180.</strong></p>
+    <form class="challenge-form" id="challenge-form" data-s4-stage="0" novalidate>
+      <fieldset class="field-group">
+        <legend>¿Cuál regalo quieres que compre Tadeo?</legend>
+        <div class="choice-grid s4-gift-grid">${choices}</div>
+      </fieldset>
+      <p class="helper-text s2-open-note">No hay una elección correcta o incorrecta. Elige el que prefieras.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Comprar por $180 <span aria-hidden="true">→</span></button>
+    </form>
+  `, "s4-store-panel");
+};
+
+const renderSituationFourReturn = () => {
+  app.innerHTML = situationFourPanel(1, `
+    <p class="s1-situation-context">Después de comprar ${situationFourGiftReminder()}, Tadeo regresa a casa.</p>
+    <h3>Un registro incompleto</h3>
+    <div class="s4-record-introduction">
+      <img src="./assets/objects/registro-ahorros.png" alt="Registro de ahorros de Tadeo" />
+      <div>
+        <p>Al revisar su registro de ahorros, Tadeo descubre que olvidó anotar sus últimos <strong>4 ingresos</strong>.</p>
+        <p>Los cuatro ingresos fueron de la <strong>misma cantidad</strong>. Después gastó <strong>$180</strong> en el regalo y le quedaron <strong>$300</strong>.</p>
+      </div>
+    </div>
+    <p class="s2-dialogue">“Necesito descubrir cuánto fue cada ingreso para completar mi registro.”</p>
+    <button class="primary-button" type="button" data-action="s4-next">Revisar los datos <span aria-hidden="true">→</span></button>
+  `, "s4-narrative-panel");
+};
+
+const renderSituationFourExploration = () => {
+  app.innerHTML = situationFourPanel(2, `
+    <p class="s1-situation-context">Distingue la información que Tadeo conoce de aquello que necesita averiguar.</p>
+    <h3>Explora el registro</h3>
+    <aside class="s4-story-summary" aria-label="Resumen de la situación">
+      <span>4 ingresos iguales</span><span>Regalo: $180</span><span>Saldo: $300</span>
+    </aside>
+    <form class="challenge-form" id="challenge-form" data-s4-stage="2" novalidate>
+      <label class="field-group">
+        <span class="field-label">a) ¿Qué cantidades conoces en esta situación?</span>
+        <textarea class="text-input open-response" name="s4_cantidades_conocidas" required>${situationFourSavedAnswer("s4_cantidades_conocidas")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">b) ¿Qué cantidad necesita encontrar Tadeo?</span>
+        <textarea class="text-input open-response" name="s4_cantidad_encontrar" required>${situationFourSavedAnswer("s4_cantidad_encontrar")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">c) ¿Cuál es la cantidad desconocida?</span>
+        <textarea class="text-input open-response" name="s4_incognita" required>${situationFourSavedAnswer("s4_incognita")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Escribe tus ideas con tus propias palabras. Conservaremos literalmente tus respuestas.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar y continuar <span aria-hidden="true">→</span></button>
+    </form>
+  `);
+};
+
+const renderSituationFourFourIncomes = () => {
+  app.innerHTML = situationFourPanel(3, `
+    <p class="s1-situation-context">En el registro faltan cuatro ingresos. Cada uno fue de la misma cantidad, que todavía no conocemos.</p>
+    <h3>Representa los cuatro ingresos</h3>
+    <div class="s4-income-slots" aria-label="Cuatro ingresos iguales de cantidad desconocida">
+      <span>Ingreso 1<strong>?</strong></span><span>Ingreso 2<strong>?</strong></span><span>Ingreso 3<strong>?</strong></span><span>Ingreso 4<strong>?</strong></span>
+    </div>
+    <form class="challenge-form" id="challenge-form" data-s4-stage="3" novalidate>
+      <label class="field-group">
+        <span class="field-label">¿Cómo representarías juntos los cuatro ingresos iguales?</span>
+        <textarea class="text-input open-response s3-math-response" name="s4_cuatro_ingresos" autocomplete="off" required>${situationFourSavedAnswer("s4_cuatro_ingresos")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Construye tu propia representación. Guardaremos exactamente lo que escribas.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar representación <span aria-hidden="true">→</span></button>
+    </form>
+  `);
+};
+
+const renderSituationFourEquation = () => {
+  app.innerHTML = situationFourPanel(4, `
+    <p class="s1-situation-context">Relaciona los cuatro ingresos iguales con el dinero que salió y el saldo que quedó.</p>
+    <h3>Construye la ecuación</h3>
+    <div class="s3-data-chips s4-data-chips" aria-label="Datos para construir la ecuación">
+      <span>4 ingresos iguales</span><span>Gasto: $180</span><span>Saldo restante: $300</span>
+    </div>
+    <form class="challenge-form" id="challenge-form" data-s4-stage="4" novalidate>
+      <label class="field-group">
+        <span class="field-label">Escribe una ecuación que represente lo ocurrido en el registro.</span>
+        <textarea class="text-input open-response s3-math-response" name="s4_ecuacion" autocomplete="off" required>${situationFourSavedAnswer("s4_ecuacion")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">La ecuación debe ser tu construcción. No tiene que seguir una única forma de escritura.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar ecuación <span aria-hidden="true">→</span></button>
+    </form>
+  `);
+};
+
+const renderSituationFourMeanings = () => {
+  app.innerHTML = situationFourPanel(5, `
+    <p class="s1-situation-context">Ahora compara tu construcción con una forma algebraica de representar el registro.</p>
+    <h3>¿Qué representa cada parte?</h3>
+    <div class="equation-card">4x − 180 = 300</div>
+    <form class="challenge-form" id="challenge-form" data-s4-stage="5" novalidate>
+      <label class="field-group">
+        <span class="field-label">¿Qué representa 4x en esta situación?</span>
+        <textarea class="text-input open-response" name="s4_significado_4x" required>${situationFourSavedAnswer("s4_significado_4x")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">¿Qué representa −180?</span>
+        <textarea class="text-input open-response" name="s4_significado_menos180" required>${situationFourSavedAnswer("s4_significado_menos180")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">¿Qué representa 300?</span>
+        <textarea class="text-input open-response" name="s4_significado_300" required>${situationFourSavedAnswer("s4_significado_300")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Explica cada parte con tus propias palabras. Estas respuestas no se califican automáticamente.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar explicaciones <span aria-hidden="true">→</span></button>
+    </form>
+  `);
+};
+
+const renderSituationFourSolve = () => {
+  const feedback = situationFourAttemptFeedback(
+    "s4_valor_x",
+    "Primer intento guardado. Pista: piensa cómo deshacer primero el gasto y después cómo repartir el total entre los cuatro ingresos.",
+    "Tus dos intentos quedaron guardados. Puedes continuar con el valor que obtuviste; no reemplazaremos tu respuesta.",
+  );
+  app.innerHTML = situationFourPanel(6, `
+    <p class="s1-situation-context">Resuelve la ecuación y registra el camino que seguiste.</p>
+    <h3>Resuelve</h3>
+    <div class="equation-card">4x − 180 = 300</div>
+    <form class="challenge-form" id="challenge-form" data-s4-stage="6" novalidate>
+      <label class="field-group">
+        <span class="field-label">Escribe tu procedimiento.</span>
+        <textarea class="text-input open-response s3-math-response" name="s4_procedimiento" autocomplete="off" required>${situationFourSavedAnswer("s4_procedimiento")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">¿Qué valor obtuviste para x?</span>
+        <input class="text-input" inputmode="numeric" name="s4_valor_x" value="${situationFourSavedAnswer("s4_valor_x")}" autocomplete="off" required />
+      </label>
+      ${feedback || '<p class="feedback" id="feedback" role="status"></p>'}
+      ${situationFourObjectiveControls("s4_valor_x")}
+    </form>
+  `);
+};
+
+const renderSituationFourExplanation = () => {
+  app.innerHTML = situationFourPanel(7, `
+    <p class="s1-situation-context">Ya registraste tus operaciones. Ahora explica por qué las realizaste.</p>
+    <h3>Explica tu procedimiento</h3>
+    <div class="equation-card">4x − 180 = 300</div>
+    <form class="challenge-form" id="challenge-form" data-s4-stage="7" novalidate>
+      <label class="field-group">
+        <span class="field-label">Con tus propias palabras, ¿cómo resolviste la ecuación?</span>
+        <textarea class="text-input open-response" name="s4_explicacion_procedimiento" required>${situationFourSavedAnswer("s4_explicacion_procedimiento")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Tu explicación es una producción personal y se conservará literalmente.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar explicación <span aria-hidden="true">→</span></button>
+    </form>
+  `);
+};
+
+const renderSituationFourCheck = () => {
+  const feedback = situationFourAttemptFeedback(
+    "s4_se_mantiene_igualdad",
+    "Primer intento guardado. Pista: calcula el lado izquierdo con el valor que encontraste y compáralo con 300.",
+    "Tus dos intentos quedaron guardados. Puedes continuar con tu comprobación e interpretación tal como las escribiste.",
+  );
+  app.innerHTML = situationFourPanel(8, `
+    <p class="s1-situation-context">Sustituye el valor encontrado, comprueba la igualdad y vuelve a la historia de Tadeo.</p>
+    <h3>Sustituye, comprueba e interpreta</h3>
+    <div class="equation-card">4x − 180 = 300</div>
+    <form class="challenge-form" id="challenge-form" data-s4-stage="8" novalidate>
+      <label class="field-group">
+        <span class="field-label">Sustituye el valor que encontraste en la ecuación.</span>
+        <textarea class="text-input open-response s3-math-response" name="s4_sustitucion" autocomplete="off" required>${situationFourSavedAnswer("s4_sustitucion")}</textarea>
+      </label>
+      <fieldset class="field-group">
+        <legend>¿Se mantiene la igualdad?</legend>
+        <div class="answer-grid two-options">
+          <label class="answer-choice"><input type="radio" name="s4_se_mantiene_igualdad" value="Sí" ${situationFourProgress.answers.s4_se_mantiene_igualdad === "Sí" ? "checked" : ""} /><span>Sí</span></label>
+          <label class="answer-choice"><input type="radio" name="s4_se_mantiene_igualdad" value="No" ${situationFourProgress.answers.s4_se_mantiene_igualdad === "No" ? "checked" : ""} /><span>No</span></label>
+        </div>
+      </fieldset>
+      <label class="field-group">
+        <span class="field-label">¿Qué representa el valor encontrado dentro de esta situación?</span>
+        <textarea class="text-input open-response" name="s4_interpretacion_resultado" required>${situationFourSavedAnswer("s4_interpretacion_resultado")}</textarea>
+      </label>
+      ${feedback || '<p class="feedback" id="feedback" role="status"></p>'}
+      ${situationFourObjectiveControls("s4_se_mantiene_igualdad")}
+    </form>
+  `);
+};
+
+const situationFourRegisterField = (index) => `
+  <label class="s4-register-row">
+    <span>Ingreso ${index}</span>
+    <span class="s4-register-amount"><span aria-hidden="true">$</span><input inputmode="numeric" name="s4_registro_ingreso${index}" value="${situationFourSavedAnswer(`s4_registro_ingreso${index}`)}" aria-label="Cantidad del ingreso ${index}" autocomplete="off" required /></span>
+  </label>`;
+
+const renderSituationFourRegister = () => {
+  const feedback = situationFourAttemptFeedback(
+    "s4_registro",
+    "Primer intento guardado. Pista: usa el valor que obtuviste para completar cada uno de los cuatro ingresos iguales.",
+    "Tus dos intentos quedaron guardados. Puedes continuar; los valores del registro no serán sustituidos por otros.",
+  );
+  app.innerHTML = situationFourPanel(9, `
+    <p class="s1-situation-context">Aplica el resultado para completar los movimientos que faltan en el registro de Tadeo.</p>
+    <h3>Actualiza el registro de ahorros</h3>
+    <form class="challenge-form" id="challenge-form" data-s4-stage="9" novalidate>
+      <div class="s4-savings-register">
+        <img src="./assets/objects/registro-ahorros.png" alt="" />
+        <div class="s4-register-balance" aria-label="Saldo restante de 300 pesos">Saldo: $300</div>
+        <div class="s4-register-entries">
+          ${[1, 2, 3, 4].map((index) => situationFourRegisterField(index)).join("")}
+          <div class="s4-register-row s4-register-expense"><span>Regalo</span><strong>−$180</strong></div>
+        </div>
+      </div>
+      <p class="helper-text s2-open-note">Completa únicamente los cuatro ingresos. El gasto y el saldo ya están registrados.</p>
+      ${feedback || '<p class="feedback" id="feedback" role="status"></p>'}
+      ${situationFourObjectiveControls("s4_registro", "Comprobar registro")}
+    </form>
+  `, "s4-register-panel");
+};
+
+const renderSituationFourAgenda = () => {
+  const items = agendaItems.map((item, index) => `
+    <li class="${index < 3 ? "s2-agenda-done" : "s2-agenda-pending"}">
+      <img class="initial-agenda-icon" src="${initialAgendaIcons[index]}" alt="" />
+      <span class="s2-agenda-task">${item}<small class="s2-agenda-status">${index < 3 ? "✓ Completada" : "Pendiente"}</small></span>
+    </li>`).join("");
+  const reminderDay = escapeHtml(situationTwoProgress.answers.s2_dia_comprar_alimento || "2");
+  app.innerHTML = situationFourPanel(10, `
+    <span class="s1-panel-kicker">Agenda actualizada</span>
+    <p class="s1-dialogue-line">¡Listo! Tadeo compró el regalo para Eloísa y completó su registro de ahorros.</p>
+    <h1>La agenda de Tadeo</h1>
+    <div class="s1-agenda-book s2-final-agenda">
+      <img src="./assets/objects/Agenda%20abierta%204%20actividades.png" alt="Agenda abierta de Tadeo con las tres primeras actividades completadas" />
+      <ol class="s1-agenda-book-list">${items}</ol>
+    </div>
+    <aside class="s2-reminder">
+      <img src="./assets/objects/bolsa_alimento_casi_vacia.png" alt="" />
+      <p><strong>Pendiente futuro</strong>Comprar alimento para el perro el día ${reminderDay}.</p>
+    </aside>
+    <p class="next-activity"><strong>Siguiente actividad:</strong> Ayudar con la cena.</p>
+    ${situationFourReviewRequested ? "" : '<button class="primary-button" type="button" data-action="start-s5">CONTINUAR <span aria-hidden="true">→</span></button>'}
+  `, "s1-agenda-panel s2-agenda-panel s4-agenda-panel");
+};
+
+const renderSituationFour = () => {
+  const stageIndex = situationFourProgress.stage;
+  progressBar.style.width = `${Math.round(((stageIndex + 1) / 11) * 100)}%`;
+  const renderers = [
+    renderSituationFourGift,
+    renderSituationFourReturn,
+    renderSituationFourExploration,
+    renderSituationFourFourIncomes,
+    renderSituationFourEquation,
+    renderSituationFourMeanings,
+    renderSituationFourSolve,
+    renderSituationFourExplanation,
+    renderSituationFourCheck,
+    renderSituationFourRegister,
+    renderSituationFourAgenda,
+  ];
+  renderers[stageIndex]();
+};
+
+const situationFiveRecipes = [
+  { value: "1", label: "Receta 1", image: "./assets/objects/receta-1.png" },
+  { value: "2", label: "Receta 2", image: "./assets/objects/receta-2.png" },
+];
+
+const situationFiveHud = (stageIndex) => {
+  const dots = Array.from(
+    { length: 12 },
+    (_, index) => `<span class="s1-hud-dot ${index < stageIndex ? "done" : ""} ${index === stageIndex ? "current" : ""}" aria-hidden="true"></span>`,
+  ).join("");
+  return `
+    <div class="s1-hud s5-hud" aria-label="Situación 5, pantalla ${stageIndex + 42} de 53">
+      <span class="s1-hud-title">Situación 5</span>
+      <span class="s1-hud-dots">${dots}</span>
+    </div>`;
+};
+
+const situationFiveObjects = (stageIndex) => {
+  const isFinalNarrative = stageIndex === 10;
+  const isAgenda = stageIndex === 11;
+  const selectedRecipe = situationFiveProgress.selectedRecipe || situationFiveProgress.answers.s5_receta_elegida || "1";
+  const selected = situationFiveRecipes.find((recipe) => recipe.value === selectedRecipe) || situationFiveRecipes[0];
+  return `
+    <div class="s5-scene-objects ${isFinalNarrative ? "s5-preparation-scene" : ""}" aria-hidden="true">
+      <img class="s5-tadeo" src="./assets/characters/${isAgenda ? "tadeo-celebrando.png" : "tadeo.png"}" alt="" />
+      <img class="s5-mama" src="./assets/characters/mama.png" alt="" />
+      ${stageIndex === 0 ? `
+        <img class="s5-scene-recipe s5-scene-recipe-one" src="./assets/objects/receta-1.png" alt="" />
+        <img class="s5-scene-recipe s5-scene-recipe-two" src="./assets/objects/receta-2.png" alt="" />
+        <img class="s5-scene-ingredient s5-scene-meat" src="./assets/objects/porcion_carne.png" alt="" />
+        <img class="s5-scene-ingredient s5-scene-side" src="./assets/objects/guarnicion_carne.png" alt="" />
+      ` : ""}
+      ${isFinalNarrative ? `
+        <img class="s5-selected-recipe-prop" src="${selected.image}" alt="" />
+        <img class="s5-preparation-meat" src="./assets/objects/porcion_carne.png" alt="" />
+        <img class="s5-preparation-side" src="./assets/objects/guarnicion_carne.png" alt="" />
+      ` : ""}
+    </div>`;
+};
+
+const situationFivePanel = (stageIndex, content, panelClass = "") => `
+  <section class="screen situation-five-screen s1-game-stage s5-game-stage" data-s5-screen="${stageIndex}" style="background-image: url('./assets/scenes/cocina.png')">
+    ${situationFiveHud(stageIndex)}
+    ${situationFiveObjects(stageIndex)}
+    <div class="s1-interface-panel s5-interface-panel ${panelClass}">
+      <div class="s3-panel-utility">
+        <div class="s1-panel-heading">
+          <span class="s1-panel-kicker">Pantalla ${stageIndex + 42} · Situación 5</span>
+          <span class="s1-panel-scene">La cocina</span>
+        </div>
+        <button class="secondary-button s3-home-button" type="button" data-action="s5-return-home">Regresar al inicio</button>
+      </div>
+      ${content}
+    </div>
+  </section>`;
+
+const situationFiveSavedAnswer = (name) => escapeHtml(situationFiveProgress.answers[name] || "");
+
+const situationFiveAttemptList = (name) => {
+  const attempts = situationFiveProgress.objectiveAttempts[name];
+  return Array.isArray(attempts) ? attempts : [];
+};
+
+const situationFiveAttemptFeedback = (name, firstHint, secondHint) => {
+  const attempts = situationFiveAttemptList(name);
+  if (!attempts.length || attempts.some((attempt) => attempt.correct)) return "";
+  return `<p class="feedback" id="feedback" role="status">${attempts.length >= 2 ? secondHint : firstHint}</p>`;
+};
+
+const situationFiveObjectiveControls = (name, firstLabel = "Comprobar y continuar") => {
+  const attempts = situationFiveAttemptList(name);
+  const exhausted = attempts.length >= 2 && !attempts.some((attempt) => attempt.correct);
+  if (exhausted) {
+    return '<button class="primary-button" type="button" data-action="s5-continue-after-attempts">Continuar con mis respuestas <span aria-hidden="true">→</span></button>';
+  }
+  return `<button class="primary-button" type="submit">${attempts.length ? "Segundo intento" : firstLabel} <span aria-hidden="true">→</span></button>`;
+};
+
+const renderSituationFiveNarrative = () => {
+  app.innerHTML = situationFivePanel(0, `
+    <p class="s1-situation-context">Última actividad de la agenda · Ayudar con la cena</p>
+    <h3>Dos formas de preparar la cena</h3>
+    <p class="challenge-intro">Tadeo entra a la cocina para ayudar a su mamá. Antes de comenzar, comparan dos formas de preparar una receta.</p>
+    <div class="s5-recipe-facts" aria-label="Datos de las dos recetas">
+      <article class="s5-recipe-fact s5-recipe-fact-one">
+        <img src="./assets/objects/receta-1.png" alt="" />
+        <div><strong>Receta 1</strong><span>150 g por porción</span><span>+ 100 g adicionales</span></div>
+      </article>
+      <article class="s5-recipe-fact s5-recipe-fact-two">
+        <img src="./assets/objects/receta-2.png" alt="" />
+        <div><strong>Receta 2</strong><span>100 g por porción</span><span>+ 300 g adicionales</span></div>
+      </article>
+    </div>
+    <p class="central-question">¿Para cuántas porciones ambas recetas requieren la misma cantidad total?</p>
+    <button class="primary-button" type="button" data-action="s5-next">Explorar las recetas <span aria-hidden="true">→</span></button>
+  `, "s5-narrative-panel");
+};
+
+const renderSituationFiveExploration = () => {
+  app.innerHTML = situationFivePanel(1, `
+    <p class="s1-situation-context">Observa los datos de ambas recetas y distingue lo que conoces de lo que necesitas averiguar.</p>
+    <h3>Explora la situación</h3>
+    <div class="s5-data-recap" aria-label="Recordatorio de los datos de las recetas">
+      <article><strong>Receta 1</strong><span>150 g por porción</span><span>+ 100 g adicionales</span></article>
+      <article><strong>Receta 2</strong><span>100 g por porción</span><span>+ 300 g adicionales</span></article>
+    </div>
+    <p class="s5-recap-question">¿Para cuántas porciones ambas recetas requieren la misma cantidad total?</p>
+    <form class="challenge-form" id="challenge-form" data-s5-stage="1" novalidate>
+      <label class="field-group">
+        <span class="field-label">a) ¿Qué cantidades conoces en esta situación?</span>
+        <textarea class="text-input open-response" name="s5_cantidades_conocidas" required>${situationFiveSavedAnswer("s5_cantidades_conocidas")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">b) ¿Qué cantidad debes encontrar?</span>
+        <textarea class="text-input open-response" name="s5_cantidad_encontrar" required>${situationFiveSavedAnswer("s5_cantidad_encontrar")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">c) ¿Cuál es la cantidad desconocida o incógnita?</span>
+        <textarea class="text-input open-response" name="s5_incognita" required>${situationFiveSavedAnswer("s5_incognita")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Escribe con tus propias palabras. Conservaremos literalmente tus respuestas.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar y continuar <span aria-hidden="true">→</span></button>
+    </form>
+  `);
+};
+
+const renderSituationFiveRecipeOne = () => {
+  app.innerHTML = situationFivePanel(2, `
+    <p class="s1-situation-context">La receta 1 utiliza 150 g de carne por cada porción y después incorpora 100 g adicionales.</p>
+    <h3>Construye la receta 1</h3>
+    <div class="s5-ingredient-reminder" aria-label="Datos de la receta 1">
+      <span><img src="./assets/objects/porcion_carne.png" alt="" />150 g por porción</span>
+      <span><img src="./assets/objects/guarnicion_carne.png" alt="" />100 g adicionales</span>
+    </div>
+    <form class="challenge-form" id="challenge-form" data-s5-stage="2" novalidate>
+      <label class="field-group">
+        <span class="field-label">¿Cómo representarías la cantidad de carne correspondiente a las porciones?</span>
+        <textarea class="text-input open-response s3-math-response" name="s5_receta1_porciones" autocomplete="off" required>${situationFiveSavedAnswer("s5_receta1_porciones")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">Ahora incorpora los 100 g adicionales. ¿Cómo representarías el total de la receta 1?</span>
+        <textarea class="text-input open-response s3-math-response" name="s5_receta1_total" autocomplete="off" required>${situationFiveSavedAnswer("s5_receta1_total")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Construye tus propias expresiones. Guardaremos exactamente lo que escribas.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar expresiones <span aria-hidden="true">→</span></button>
+    </form>
+  `);
+};
+
+const renderSituationFiveRecipeTwo = () => {
+  app.innerHTML = situationFivePanel(3, `
+    <p class="s1-situation-context">La receta 2 utiliza 100 g de carne por cada porción y 300 g adicionales.</p>
+    <h3>Construye la receta 2</h3>
+    <div class="s5-ingredient-reminder" aria-label="Datos de la receta 2">
+      <span><img src="./assets/objects/porcion_carne.png" alt="" />100 g por porción</span>
+      <span><img src="./assets/objects/guarnicion_carne.png" alt="" />300 g adicionales</span>
+    </div>
+    <form class="challenge-form" id="challenge-form" data-s5-stage="3" novalidate>
+      <label class="field-group">
+        <span class="field-label">¿Cómo representarías la cantidad total de la receta 2?</span>
+        <textarea class="text-input open-response s3-math-response" name="s5_receta2_total" autocomplete="off" required>${situationFiveSavedAnswer("s5_receta2_total")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Escribe tu propia expresión. No será reemplazada por una respuesta modelo.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar expresión <span aria-hidden="true">→</span></button>
+    </form>
+  `);
+};
+
+const renderSituationFiveRelation = () => {
+  const feedback = situationFiveAttemptFeedback(
+    "s5_signo_relacion",
+    "Primer intento guardado. Pista: piensa qué debe indicar el signo cuando las dos cantidades totales representan el mismo valor.",
+    "Tus dos intentos quedaron guardados. Puedes continuar con el signo que elegiste; no cambiaremos tu respuesta.",
+  );
+  const selected = situationFiveProgress.answers.s5_signo_relacion || "";
+  app.innerHTML = situationFivePanel(4, `
+    <p class="s1-situation-context">Compara las expresiones que construiste sin cambiar su escritura.</p>
+    <h3>Relaciona las dos recetas</h3>
+    <div class="s5-student-expressions" aria-label="Expresiones construidas por el estudiante">
+      <article><span>Tu receta 1</span><strong>${situationFiveSavedAnswer("s5_receta1_total")}</strong></article>
+      <article><span>Tu receta 2</span><strong>${situationFiveSavedAnswer("s5_receta2_total")}</strong></article>
+    </div>
+    <form class="challenge-form" id="challenge-form" data-s5-stage="4" novalidate>
+      <fieldset class="field-group">
+        <legend>¿Qué signo debe relacionar las expresiones cuando representan la misma cantidad total?</legend>
+        <div class="answer-grid s5-sign-grid">
+          ${["=", "<", ">"].map((sign) => `<label class="answer-choice s5-sign-choice"><input type="radio" name="s5_signo_relacion" value="${sign}" ${selected === sign ? "checked" : ""} /><span>${sign}</span></label>`).join("")}
+        </div>
+      </fieldset>
+      ${feedback || '<p class="feedback" id="feedback" role="status"></p>'}
+      ${situationFiveObjectiveControls("s5_signo_relacion")}
+    </form>
+  `);
+};
+
+const renderSituationFiveEquation = () => {
+  const builtEquation = situationFiveProgress.answers.s5_ecuacion_construida || "";
+  app.innerHTML = situationFivePanel(5, `
+    <p class="s1-situation-context">Usa exactamente tus expresiones y el signo que elegiste para formar una relación completa.</p>
+    <h3>Construye la ecuación</h3>
+    <div class="s5-equation-parts" aria-label="Elementos disponibles para construir la relación">
+      <span>${situationFiveSavedAnswer("s5_receta1_total")}</span>
+      <b>${situationFiveSavedAnswer("s5_signo_relacion")}</b>
+      <span>${situationFiveSavedAnswer("s5_receta2_total")}</span>
+    </div>
+    ${builtEquation
+      ? `<div class="s5-built-equation"><span>Tu relación construida</span><strong>${escapeHtml(builtEquation)}</strong></div>`
+      : '<button class="primary-button s5-build-button" type="button" data-action="s5-build-equation">Formar relación con mis expresiones</button>'}
+    <form class="challenge-form" id="challenge-form" data-s5-stage="5" novalidate>
+      <input type="hidden" name="s5_sustitucion_expresiones" value="${situationFiveSavedAnswer("s5_sustitucion_expresiones")}" />
+      <input type="hidden" name="s5_ecuacion_construida" value="${situationFiveSavedAnswer("s5_ecuacion_construida")}" />
+      <label class="field-group">
+        <span class="field-label">¿Qué significa el signo = en esta situación?</span>
+        <textarea class="text-input open-response" name="s5_significado_igual" required>${situationFiveSavedAnswer("s5_significado_igual")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Explica con tus propias palabras. Tu relación y tu explicación se conservarán literalmente.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Guardar relación y explicación <span aria-hidden="true">→</span></button>
+    </form>
+  `);
+};
+
+const renderSituationFiveSolve = () => {
+  const feedback = situationFiveAttemptFeedback(
+    "s5_valor_x",
+    "Primer intento guardado. Pista: reúne en un lado los términos que contienen x y en el otro las cantidades conocidas.",
+    "Tus dos intentos quedaron guardados. Puedes continuar con el valor que obtuviste; no reemplazaremos tu respuesta.",
+  );
+  app.innerHTML = situationFivePanel(6, `
+    <p class="s1-situation-context">Ahora resuelve la relación y registra el camino que seguiste.</p>
+    <h3>Resuelve y explica</h3>
+    <div class="equation-card">150x + 100 = 100x + 300</div>
+    <form class="challenge-form" id="challenge-form" data-s5-stage="6" novalidate>
+      <label class="field-group">
+        <span class="field-label">Escribe tu procedimiento.</span>
+        <textarea class="text-input open-response s3-math-response" name="s5_procedimiento" autocomplete="off" required>${situationFiveSavedAnswer("s5_procedimiento")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">¿Qué valor obtuviste para x?</span>
+        <input class="text-input" name="s5_valor_x" value="${situationFiveSavedAnswer("s5_valor_x")}" autocomplete="off" required />
+      </label>
+      <label class="field-group">
+        <span class="field-label">Explica con tus propias palabras cómo resolviste la ecuación.</span>
+        <textarea class="text-input open-response" name="s5_explicacion_procedimiento" required>${situationFiveSavedAnswer("s5_explicacion_procedimiento")}</textarea>
+      </label>
+      ${feedback || '<p class="feedback" id="feedback" role="status"></p>'}
+      ${situationFiveObjectiveControls("s5_valor_x")}
+    </form>
+  `);
+};
+
+const renderSituationFiveCheck = () => {
+  const feedback = situationFiveAttemptFeedback(
+    "s5_comprobacion",
+    "Primer intento guardado. Pista: calcula por separado cada expresión usando el valor de x que escribiste y después compara los resultados.",
+    "Tus dos intentos quedaron guardados. Puedes continuar con tus sustituciones y resultados tal como los escribiste.",
+  );
+  const sameAmount = situationFiveProgress.answers.s5_misma_cantidad || "";
+  app.innerHTML = situationFivePanel(7, `
+    <p class="s1-situation-context">Comprueba las dos recetas usando el valor que realmente encontraste: <strong>x = ${situationFiveSavedAnswer("s5_valor_x")}</strong>.</p>
+    <h3>Sustituye y compara</h3>
+    <div class="s5-equations-reference" aria-label="Expresiones de las recetas para realizar la sustitución">
+      <article><span>Receta 1</span><strong>150x + 100</strong></article>
+      <article><span>Receta 2</span><strong>100x + 300</strong></article>
+    </div>
+    <form class="challenge-form" id="challenge-form" data-s5-stage="7" novalidate>
+      <div class="s5-substitution-grid">
+        <fieldset class="s5-substitution-card">
+          <legend>Receta 1</legend>
+          <label class="field-group"><span class="field-label">Sustituye tu valor de x.</span><textarea class="text-input open-response s3-math-response" name="s5_sustitucion_receta1_x" required>${situationFiveSavedAnswer("s5_sustitucion_receta1_x")}</textarea></label>
+          <label class="field-group"><span class="field-label">¿Qué resultado obtuviste?</span><input class="text-input" name="s5_resultado_receta1" value="${situationFiveSavedAnswer("s5_resultado_receta1")}" required /></label>
+        </fieldset>
+        <fieldset class="s5-substitution-card">
+          <legend>Receta 2</legend>
+          <label class="field-group"><span class="field-label">Sustituye tu valor de x.</span><textarea class="text-input open-response s3-math-response" name="s5_sustitucion_receta2_x" required>${situationFiveSavedAnswer("s5_sustitucion_receta2_x")}</textarea></label>
+          <label class="field-group"><span class="field-label">¿Qué resultado obtuviste?</span><input class="text-input" name="s5_resultado_receta2" value="${situationFiveSavedAnswer("s5_resultado_receta2")}" required /></label>
+        </fieldset>
+      </div>
+      <fieldset class="field-group">
+        <legend>¿Ambas recetas requieren la misma cantidad?</legend>
+        <div class="answer-grid two-options">
+          <label class="answer-choice"><input type="radio" name="s5_misma_cantidad" value="Sí" ${sameAmount === "Sí" ? "checked" : ""} /><span>Sí</span></label>
+          <label class="answer-choice"><input type="radio" name="s5_misma_cantidad" value="No" ${sameAmount === "No" ? "checked" : ""} /><span>No</span></label>
+        </div>
+      </fieldset>
+      <label class="field-group">
+        <span class="field-label">¿Cuántos gramos requiere cada receta?</span>
+        <input class="text-input" name="s5_gramos_cada_receta" value="${situationFiveSavedAnswer("s5_gramos_cada_receta")}" required />
+      </label>
+      ${feedback || '<p class="feedback" id="feedback" role="status"></p>'}
+      ${situationFiveObjectiveControls("s5_comprobacion")}
+    </form>
+  `, "s5-check-panel");
+};
+
+const renderSituationFivePortions = () => {
+  const feedback = situationFiveAttemptFeedback(
+    "s5_porciones_final",
+    "Primer intento guardado. Pista: vuelve al significado de x dentro de la historia de las recetas.",
+    "Tus dos intentos quedaron guardados. Puedes continuar con tu interpretación tal como la escribiste.",
+  );
+  app.innerHTML = situationFivePanel(8, `
+    <p class="s1-situation-context">Vuelve a la pregunta con la que comenzó la situación.</p>
+    <h3>Interpreta el resultado</h3>
+    <form class="challenge-form" id="challenge-form" data-s5-stage="8" novalidate>
+      <label class="field-group">
+        <span class="field-label">¿Para cuántas porciones ambas recetas requieren la misma cantidad total?</span>
+        <textarea class="text-input open-response" name="s5_porciones_final" required>${situationFiveSavedAnswer("s5_porciones_final")}</textarea>
+      </label>
+      <p class="helper-text s2-open-note">Responde dentro del contexto de las porciones, no solamente con una operación.</p>
+      ${feedback || '<p class="feedback" id="feedback" role="status"></p>'}
+      ${situationFiveObjectiveControls("s5_porciones_final")}
+    </form>
+  `);
+};
+
+const renderSituationFiveChoice = () => {
+  const selected = situationFiveProgress.selectedRecipe || situationFiveProgress.answers.s5_receta_elegida || "";
+  const choices = situationFiveRecipes.map((recipe) => `
+    <label class="choice-card s5-recipe-choice">
+      <input type="radio" name="s5_receta_elegida" value="${recipe.value}" ${selected === recipe.value ? "checked" : ""} />
+      <span><img src="${recipe.image}" alt="" /><strong>${recipe.label}</strong></span>
+    </label>`).join("");
+  app.innerHTML = situationFivePanel(9, `
+    <p class="s1-situation-context">Después de comparar las cantidades, Tadeo puede elegir libremente qué receta preparar.</p>
+    <h3>Elige una receta</h3>
+    <form class="challenge-form" id="challenge-form" data-s5-stage="9" novalidate>
+      <fieldset class="field-group">
+        <legend>¿Cuál de las dos recetas quieres que preparen Tadeo y su mamá?</legend>
+        <div class="choice-grid s5-recipe-choice-grid">${choices}</div>
+      </fieldset>
+      <p class="helper-text s2-open-note">No hay una elección correcta o incorrecta. La solución matemática no cambia.</p>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="primary-button" type="submit">Preparar la receta elegida <span aria-hidden="true">→</span></button>
+    </form>
+  `, "s5-choice-panel");
+};
+
+const renderSituationFivePreparation = () => {
+  const selectedRecipe = situationFiveProgress.selectedRecipe || situationFiveProgress.answers.s5_receta_elegida || "1";
+  const selected = situationFiveRecipes.find((recipe) => recipe.value === selectedRecipe) || situationFiveRecipes[0];
+  app.innerHTML = situationFivePanel(10, `
+    <p class="s1-situation-context">Preparación de la cena</p>
+    <h3>Tadeo ayuda con ${selected.label.toLowerCase()}</h3>
+    <div class="s5-preparation-story">
+      <img src="${selected.image}" alt="${selected.label}" />
+      <div>
+        <p>Tadeo coloca la tarjeta de <strong>${selected.label}</strong> sobre la mesa. Su mamá prepara los ingredientes y él ayuda a organizar la carne y la guarnición.</p>
+        <p>Juntos terminan de preparar la cena que eligieron.</p>
+      </div>
+    </div>
+    <p class="s2-dialogue">“¡Listo! Ya ayudé con la última actividad de mi agenda.”</p>
+    <button class="primary-button" type="button" data-action="s5-next">Ver agenda final <span aria-hidden="true">→</span></button>
+  `, "s5-preparation-panel");
+};
+
+const renderSituationFiveAgenda = () => {
+  const items = agendaItems.map((item, index) => `
+    <li class="s2-agenda-done">
+      <img class="initial-agenda-icon" src="${initialAgendaIcons[index]}" alt="" />
+      <span class="s2-agenda-task">${item}<small class="s2-agenda-status">✓ Completada</small></span>
+    </li>`).join("");
+  const reminderDay = escapeHtml(situationTwoProgress.answers.s2_dia_comprar_alimento || "2");
+  app.innerHTML = situationFivePanel(11, `
+    <span class="s1-panel-kicker">Agenda actualizada</span>
+    <p class="s1-dialogue-line">¡Listo! Tadeo ayudó con la cena y terminó sus cuatro actividades principales.</p>
+    <h1>La agenda de Tadeo</h1>
+    <div class="s1-agenda-book s2-final-agenda">
+      <img src="./assets/objects/Agenda%20abierta%204%20actividades.png" alt="Agenda abierta de Tadeo con las cuatro actividades completadas" />
+      <ol class="s1-agenda-book-list">${items}</ol>
+    </div>
+    <aside class="s2-reminder">
+      <img src="./assets/objects/bolsa_alimento_casi_vacia.png" alt="" />
+      <p><strong>Pendiente futuro</strong>Comprar alimento para el perro el día ${reminderDay}.</p>
+    </aside>
+    <p class="s5-agenda-complete"><strong>Actividades principales:</strong> 4 de 4 completadas.</p>
+  `, "s1-agenda-panel s2-agenda-panel s5-agenda-panel");
+};
+
+const renderSituationFive = () => {
+  const stageIndex = situationFiveProgress.stage;
+  progressBar.style.width = `${Math.round(((stageIndex + 1) / 12) * 100)}%`;
+  const renderers = [
+    renderSituationFiveNarrative,
+    renderSituationFiveExploration,
+    renderSituationFiveRecipeOne,
+    renderSituationFiveRecipeTwo,
+    renderSituationFiveRelation,
+    renderSituationFiveEquation,
+    renderSituationFiveSolve,
+    renderSituationFiveCheck,
+    renderSituationFivePortions,
+    renderSituationFiveChoice,
+    renderSituationFivePreparation,
+    renderSituationFiveAgenda,
+  ];
+  renderers[stageIndex]();
+};
+
 const renderScene = () => {
   const sceneIndex = state.currentScene;
   const stepIndex = state.currentStep;
+  if (sceneIndex === 1) {
+    renderSituationTwo();
+    return;
+  }
+  if (sceneIndex === 2) {
+    renderSituationThree();
+    return;
+  }
+  if (sceneIndex === 3) {
+    renderSituationFour();
+    return;
+  }
   const scene = scenes[sceneIndex];
   const step = scene.steps[stepIndex];
   const questionDots = scene.steps
@@ -846,8 +2538,27 @@ const render = () => {
   document.body.dataset.view = introPhase;
   if (!researchSession && introPhase === "access") renderAccess();
   else if (!researchSession) renderHome();
+  else if (introPhase === "home") renderHome();
+  else if (situationFiveReviewRequested) renderSituationFive();
+  else if (situationFourReviewRequested) renderSituationFour();
+  else if (situationThreeReviewRequested) renderSituationThree();
   else if (introPhase === "presentation") renderPresentation();
   else if (introPhase === "agenda") renderInitialAgenda();
+  else if (situationOneReviewRequested) {
+    situationOneProgress.stage = Math.min(situationOneProgress.stage, 6);
+    renderSituationOne();
+  }
+  else if (situationThreeProgress.stage === 9 && !hasSituationFourProgress) renderSituationThree();
+  else if (hasSituationFiveProgress) renderSituationFive();
+  else if (hasSituationFourProgress) renderSituationFour();
+  else if (state.currentScene === 0 || (hasSituationOneProgress && situationOneProgress.stage < 7)) renderSituationOne();
+  else if (state.currentScene === 2 && hasSituationThreeProgress) renderSituationThree();
+  else if (state.currentScene === 3) renderSituationFour();
+  else if (state.currentScene === 1 || situationTwoProgress.stage === 8) renderSituationTwo();
+  else if (state.currentScene === 4) {
+    ensureSituationFiveProgress();
+    renderSituationFive();
+  }
   else if (state.currentScene >= scenes.length) renderFinish();
   else renderScene();
   app.focus({ preventScroll: true });
@@ -905,6 +2616,11 @@ const startSession = async (code, allowResume = true) => {
   researchSession = { id: data.state.session_id, token: data.session_token, code: data.state.participant_code, introPhase: "game" };
   saveResearchSession();
   applyServerState(data.state);
+  loadSituationOneProgress();
+  loadSituationTwoProgress();
+  loadSituationThreeProgress();
+  loadSituationFourProgress();
+  loadSituationFiveProgress();
   beginActivityTracking();
 };
 
@@ -920,6 +2636,492 @@ const completeCurrentScene = (sceneIndex) => {
   showToast(`Nuevo descubrimiento: ${discoveries[sceneIndex].title}`);
 };
 
+const submitSituationTwoStage = async (form, stageIndex) => {
+  const feedback = form.querySelector("#feedback");
+  const originalAnswers = Object.fromEntries(new FormData(form).entries());
+  situationTwoProgress.answers = { ...situationTwoProgress.answers, ...originalAnswers };
+  saveSituationTwoProgress();
+  const emptyTextField = [...form.querySelectorAll("input:not([type='radio']), textarea")]
+    .find((field) => !field.value.trim());
+  if (emptyTextField) {
+    const symbolButton = form.querySelector("[data-s2-symbol]");
+    feedback.textContent = emptyTextField.type === "hidden"
+      ? "Elige una letra o un símbolo antes de continuar."
+      : "Completa todos los campos antes de continuar.";
+    (emptyTextField.type === "hidden" && symbolButton ? symbolButton : emptyTextField).focus();
+    return;
+  }
+
+  if (stageIndex === 2 && originalAnswers.s2_dias_alimento.trim() !== "3") {
+    feedback.textContent = "Pista: ¿cuántos grupos de 300 g caben en 900 g?";
+    form.querySelector("[name='s2_dias_alimento']").focus();
+    return;
+  }
+  if (stageIndex === 7 && originalAnswers.s2_dia_comprar_alimento.trim() !== "2") {
+    feedback.textContent = "Recuerda: la compra debe hacerse un día antes de que terminen los 3 días de alimento.";
+    form.querySelector("[name='s2_dia_comprar_alimento']").focus();
+    return;
+  }
+
+  if (stageIndex === 3 || stageIndex === 4) {
+    situationTwoProgress.stage = stageIndex + 1;
+    saveSituationTwoProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
+  const requestByStage = {
+    1: {
+      stepIndex: 0,
+      compatibility: { totalFood: "900", dailyFood: "300", unknown: "days" },
+    },
+    2: {
+      stepIndex: 1,
+      compatibility: { days: originalAnswers.s2_dias_alimento, repeatedSum: "300 + 300 + 300 = 900" },
+    },
+    5: {
+      stepIndex: 2,
+      compatibility: {
+        symbol: situationTwoProgress.answers.s2_representacion_incognita,
+        symbolMeaning: "days",
+      },
+    },
+    7: {
+      stepIndex: 3,
+      compatibility: { buyDay: originalAnswers.s2_dia_comprar_alimento },
+    },
+  };
+  const request = requestByStage[stageIndex];
+  const answers = { ...situationTwoProgress.answers, ...request.compatibility };
+  const fingerprint = JSON.stringify({ sessionId: researchSession.id, sceneIndex: 1, stepIndex: request.stepIndex, answers });
+  const savedPending = loadJson(PENDING_ATTEMPT_KEY, null);
+  const pending = savedPending?.fingerprint === fingerprint
+    ? savedPending
+    : { event_id: crypto.randomUUID(), fingerprint };
+  localStorage.setItem(PENDING_ATTEMPT_KEY, JSON.stringify(pending));
+
+  const button = form.querySelector("button[type='submit']");
+  button.disabled = true;
+  button.textContent = "Guardando…";
+  collectActiveSlice();
+  flushActivity();
+  try {
+    const result = await apiRequest(`/api/sessions/${researchSession.id}/attempts`, {
+      method: "POST",
+      body: JSON.stringify({ event_id: pending.event_id, scene_index: 1, step_index: request.stepIndex, answers }),
+    });
+    localStorage.removeItem(PENDING_ATTEMPT_KEY);
+    applyServerState(result.state);
+    if (!result.correct) throw new Error(result.hint || "No fue posible guardar las respuestas.");
+    situationTwoProgress.stage = stageIndex + 1;
+    saveSituationTwoProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (error) {
+    feedback.textContent = error.message;
+    button.disabled = false;
+    button.textContent = "Reintentar y guardar";
+  }
+};
+
+const selectSituationTwoSymbol = (button, moveFocus = false) => {
+  const group = button.closest("[role='radiogroup']");
+  const form = button.closest("form");
+  if (!group || !form) return;
+  const buttons = [...group.querySelectorAll("[data-s2-symbol]")];
+  const name = button.dataset.symbolName;
+  const input = form.elements.namedItem(name);
+  buttons.forEach((item) => {
+    const isSelected = item === button;
+    item.setAttribute("aria-checked", String(isSelected));
+    item.classList.toggle("selected", isSelected);
+    item.tabIndex = isSelected ? 0 : -1;
+  });
+  if (input) input.value = button.dataset.s2Symbol;
+  situationTwoProgress.answers[name] = button.dataset.s2Symbol;
+  saveSituationTwoProgress();
+  form.querySelector("#feedback").textContent = "";
+  if (moveFocus) button.focus();
+};
+
+const selectSituationThreeSymbol = (button, moveFocus = false) => {
+  const group = button.closest("[role='radiogroup']");
+  const form = button.closest("form");
+  if (!group || !form) return;
+  const buttons = [...group.querySelectorAll("[data-s2-symbol]")];
+  const name = button.dataset.symbolName;
+  const input = form.elements.namedItem(name);
+  buttons.forEach((item) => {
+    const isSelected = item === button;
+    item.setAttribute("aria-checked", String(isSelected));
+    item.classList.toggle("selected", isSelected);
+    item.tabIndex = isSelected ? 0 : -1;
+  });
+  if (input) input.value = button.dataset.s2Symbol;
+  situationThreeProgress.answers[name] = button.dataset.s2Symbol;
+  saveSituationThreeProgress();
+  form.querySelector("#feedback").textContent = "";
+  if (moveFocus) button.focus();
+};
+
+const selectUnknownRepresentation = (button, moveFocus = false) => {
+  if (button.dataset.symbolName === "s3_representacion_incognita") {
+    selectSituationThreeSymbol(button, moveFocus);
+    return;
+  }
+  selectSituationTwoSymbol(button, moveFocus);
+};
+
+const persistSituationThreeDraft = () => {
+  const form = document.querySelector("form[data-s3-stage]");
+  if (!form) return;
+  const draft = Object.fromEntries(new FormData(form).entries());
+  situationThreeProgress.answers = { ...situationThreeProgress.answers, ...draft };
+  saveSituationThreeProgress();
+};
+
+const submitSituationThreeRemote = async (stageIndex, submittedAnswers) => {
+  const stepByStage = { 1: 0, 5: 1, 7: 2, 8: 3 };
+  const stepIndex = stepByStage[stageIndex];
+  if (
+    situationThreeReviewRequested
+    || stepIndex === undefined
+    || state.currentScene !== 2
+    || state.currentStep !== stepIndex
+  ) return null;
+
+  const compatibilityByStage = {
+    1: { notebookCount: "5", colorsPrice: "45", unknown: "notebookPrice" },
+    5: { notebooksExpression: "5x", equation: "5x + 45 = 195" },
+    7: {
+      price: submittedAnswers.s3_valor_x,
+      notebook: submittedAnswers.s3_cuaderno_elegido === "A"
+        ? "30"
+        : submittedAnswers.s3_cuaderno_elegido === "B" ? "35" : "40",
+    },
+    8: {
+      total: "195",
+      isEqual: submittedAnswers.s3_se_mantiene_igualdad === "Sí" ? "yes" : "no",
+    },
+  };
+  const answers = {
+    ...situationThreeProgress.answers,
+    ...submittedAnswers,
+    ...compatibilityByStage[stageIndex],
+  };
+  const fingerprint = JSON.stringify({ sessionId: researchSession.id, sceneIndex: 2, stepIndex, answers });
+  const savedPending = loadJson(PENDING_ATTEMPT_KEY, null);
+  const pending = savedPending?.fingerprint === fingerprint
+    ? savedPending
+    : { event_id: crypto.randomUUID(), fingerprint };
+  localStorage.setItem(PENDING_ATTEMPT_KEY, JSON.stringify(pending));
+  collectActiveSlice();
+  flushActivity();
+  const result = await apiRequest(`/api/sessions/${researchSession.id}/attempts`, {
+    method: "POST",
+    body: JSON.stringify({ event_id: pending.event_id, scene_index: 2, step_index: stepIndex, answers }),
+  });
+  localStorage.removeItem(PENDING_ATTEMPT_KEY);
+  applyServerState(result.state);
+  return result;
+};
+
+const submitSituationThreeStage = async (form, stageIndex) => {
+  const feedback = form.querySelector("#feedback");
+  let submittedAnswers = Object.fromEntries(new FormData(form).entries());
+  situationThreeProgress.answers = { ...situationThreeProgress.answers, ...submittedAnswers };
+  saveSituationThreeProgress();
+
+  const requiredNames = {
+    1: ["s3_cantidades_conocidas", "s3_cantidad_encontrar", "s3_incognita"],
+    2: ["s3_representacion_incognita"],
+    3: ["s3_cinco_cuadernos"],
+    4: ["s3_igualdad_compra"],
+    5: ["s3_representacion_breve"],
+    7: ["s3_valor_x", "s3_cuaderno_elegido"],
+    8: ["s3_sustitucion", "s3_se_mantiene_igualdad"],
+  };
+  const missingName = requiredNames[stageIndex].find(
+    (name) => !String(situationThreeProgress.answers[name] ?? "").trim(),
+  );
+  if (missingName) {
+    feedback.textContent = missingName === "s3_representacion_incognita"
+      ? "Elige una letra o un símbolo antes de continuar."
+      : "Completa todos los campos antes de continuar.";
+    const missingField = form.elements.namedItem(missingName);
+    const focusTarget = missingField?.type === "hidden"
+      ? form.querySelector("[data-s2-symbol]")
+      : missingField?.length ? missingField[0] : missingField;
+    focusTarget?.focus();
+    return;
+  }
+
+  const button = form.querySelector("button[type='submit']");
+  const objectiveName = stageIndex === 7 ? "s3_resolver" : stageIndex === 8 ? "s3_comprobacion" : null;
+  let attempt = null;
+  if (objectiveName) {
+    const attempts = situationThreeAttemptList(objectiveName);
+    const pendingAttempt = attempts.at(-1)?.syncPending ? attempts.at(-1) : null;
+    if (pendingAttempt) {
+      attempt = pendingAttempt;
+      submittedAnswers = { ...pendingAttempt.answers };
+    } else {
+      const correct = stageIndex === 7
+        ? String(submittedAnswers.s3_valor_x).trim() === "30" && submittedAnswers.s3_cuaderno_elegido === "A"
+        : submittedAnswers.s3_se_mantiene_igualdad === "Sí";
+      attempt = { answers: { ...submittedAnswers }, correct, syncPending: false };
+      situationThreeProgress.objectiveAttempts[objectiveName] = [...attempts, attempt];
+      saveSituationThreeProgress();
+    }
+  }
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Guardando…";
+  }
+  let remoteResult = null;
+  try {
+    if (attempt && !situationThreeReviewRequested && state.currentScene === 2) {
+      attempt.syncPending = true;
+      saveSituationThreeProgress();
+    }
+    remoteResult = await submitSituationThreeRemote(stageIndex, submittedAnswers);
+    if (attempt) {
+      attempt.syncPending = false;
+      saveSituationThreeProgress();
+    }
+  } catch (error) {
+    if (attempt) {
+      attempt.syncPending = true;
+      saveSituationThreeProgress();
+    }
+    feedback.textContent = `${error.message} Tu respuesta y tu pantalla permanecen guardadas en este dispositivo.`;
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Reintentar guardado";
+    }
+    return;
+  }
+
+  if (!objectiveName) {
+    if (remoteResult && !remoteResult.correct) {
+      feedback.textContent = remoteResult.hint || "No fue posible registrar este avance.";
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Reintentar y guardar";
+      }
+      return;
+    }
+    situationThreeProgress.stage = stageIndex + 1;
+    saveSituationThreeProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
+  if (attempt.correct) {
+    situationThreeProgress.stage = stageIndex + 1;
+    saveSituationThreeProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
+  const attempts = situationThreeAttemptList(objectiveName);
+  if (attempts.length >= 2) {
+    render();
+    return;
+  }
+  feedback.textContent = stageIndex === 7
+    ? "Primer intento guardado. Pista: retira primero los $45 de los colores y reparte lo que queda entre los cinco cuadernos."
+    : "Primer intento guardado. Pista: calcula el lado izquierdo de tu sustitución y compáralo con $195.";
+  if (button) {
+    button.disabled = false;
+    button.textContent = "Segundo intento";
+  }
+};
+
+const persistSituationFourDraft = () => {
+  const form = document.querySelector("form[data-s4-stage]");
+  if (!form) return;
+  const draft = Object.fromEntries(new FormData(form).entries());
+  situationFourProgress.answers = { ...situationFourProgress.answers, ...draft };
+  if (draft.s4_regalo_elegido) situationFourProgress.selectedGift = draft.s4_regalo_elegido;
+  saveSituationFourProgress();
+};
+
+const situationFourObjectiveForStage = (stageIndex) => {
+  if (stageIndex === 6) return "s4_valor_x";
+  if (stageIndex === 8) return "s4_se_mantiene_igualdad";
+  if (stageIndex === 9) return "s4_registro";
+  return null;
+};
+
+const situationFourObjectiveIsCorrect = (stageIndex, answers) => {
+  if (stageIndex === 6) return String(answers.s4_valor_x ?? "").trim() === "120";
+  if (stageIndex === 8) return answers.s4_se_mantiene_igualdad === "Sí";
+  if (stageIndex === 9) {
+    return [1, 2, 3, 4].every(
+      (index) => String(answers[`s4_registro_ingreso${index}`] ?? "").trim() === "120",
+    );
+  }
+  return true;
+};
+
+const submitSituationFourStage = (form, stageIndex) => {
+  const feedback = form.querySelector("#feedback");
+  const submittedAnswers = Object.fromEntries(new FormData(form).entries());
+  situationFourProgress.answers = { ...situationFourProgress.answers, ...submittedAnswers };
+  if (submittedAnswers.s4_regalo_elegido) {
+    situationFourProgress.selectedGift = submittedAnswers.s4_regalo_elegido;
+  }
+  saveSituationFourProgress();
+
+  const requiredNames = {
+    0: ["s4_regalo_elegido"],
+    2: ["s4_cantidades_conocidas", "s4_cantidad_encontrar", "s4_incognita"],
+    3: ["s4_cuatro_ingresos"],
+    4: ["s4_ecuacion"],
+    5: ["s4_significado_4x", "s4_significado_menos180", "s4_significado_300"],
+    6: ["s4_procedimiento", "s4_valor_x"],
+    7: ["s4_explicacion_procedimiento"],
+    8: ["s4_sustitucion", "s4_se_mantiene_igualdad", "s4_interpretacion_resultado"],
+    9: ["s4_registro_ingreso1", "s4_registro_ingreso2", "s4_registro_ingreso3", "s4_registro_ingreso4"],
+  };
+  const missingName = requiredNames[stageIndex].find(
+    (name) => !String(situationFourProgress.answers[name] ?? "").trim(),
+  );
+  if (missingName) {
+    feedback.textContent = missingName === "s4_regalo_elegido"
+      ? "Elige uno de los tres regalos antes de continuar."
+      : "Completa todos los campos antes de continuar.";
+    const missingField = form.elements.namedItem(missingName);
+    const focusTarget = missingField?.length ? missingField[0] : missingField;
+    focusTarget?.focus();
+    return;
+  }
+
+  const objectiveName = situationFourObjectiveForStage(stageIndex);
+  if (objectiveName) {
+    const attempts = situationFourAttemptList(objectiveName);
+    if (attempts.length >= 2) return;
+    const attempt = {
+      answers: { ...submittedAnswers },
+      correct: situationFourObjectiveIsCorrect(stageIndex, submittedAnswers),
+    };
+    situationFourProgress.objectiveAttempts[objectiveName] = [...attempts, attempt];
+    saveSituationFourProgress();
+    if (!attempt.correct) {
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+  }
+
+  situationFourProgress.stage = Math.min(10, stageIndex + 1);
+  saveSituationFourProgress();
+  render();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+const persistSituationFiveDraft = () => {
+  const form = document.querySelector("form[data-s5-stage]");
+  if (!form) return;
+  const draft = Object.fromEntries(new FormData(form).entries());
+  situationFiveProgress.answers = { ...situationFiveProgress.answers, ...draft };
+  if (draft.s5_receta_elegida) situationFiveProgress.selectedRecipe = draft.s5_receta_elegida;
+  saveSituationFiveProgress();
+};
+
+const situationFiveObjectiveForStage = (stageIndex) => {
+  if (stageIndex === 4) return "s5_signo_relacion";
+  if (stageIndex === 6) return "s5_valor_x";
+  if (stageIndex === 7) return "s5_comprobacion";
+  if (stageIndex === 8) return "s5_porciones_final";
+  return null;
+};
+
+const situationFiveValueIsFour = (value) => /^(?:x\s*=\s*)?4(?:[.,]0+)?$/i.test(String(value ?? "").trim());
+const situationFiveValueIsSevenHundred = (value) => /^700(?:[.,]0+)?\s*(?:g|gr|gramos?)?$/i.test(String(value ?? "").trim());
+const situationFivePortionsAreFour = (value) => {
+  const text = String(value ?? "").trim().toLowerCase();
+  return situationFiveValueIsFour(text) || (/\b4\b/.test(text) && /porci(?:ón|on|ones)/.test(text));
+};
+
+const situationFiveObjectiveIsCorrect = (stageIndex, answers) => {
+  if (stageIndex === 4) return answers.s5_signo_relacion === "=";
+  if (stageIndex === 6) return situationFiveValueIsFour(answers.s5_valor_x);
+  if (stageIndex === 7) {
+    return situationFiveValueIsSevenHundred(answers.s5_resultado_receta1)
+      && situationFiveValueIsSevenHundred(answers.s5_resultado_receta2)
+      && answers.s5_misma_cantidad === "Sí"
+      && situationFiveValueIsSevenHundred(answers.s5_gramos_cada_receta);
+  }
+  if (stageIndex === 8) return situationFivePortionsAreFour(answers.s5_porciones_final);
+  return true;
+};
+
+const submitSituationFiveStage = (form, stageIndex) => {
+  const feedback = form.querySelector("#feedback");
+  const submittedAnswers = Object.fromEntries(new FormData(form).entries());
+  situationFiveProgress.answers = { ...situationFiveProgress.answers, ...submittedAnswers };
+  if (submittedAnswers.s5_receta_elegida) {
+    situationFiveProgress.selectedRecipe = submittedAnswers.s5_receta_elegida;
+  }
+  saveSituationFiveProgress();
+
+  const requiredNames = {
+    1: ["s5_cantidades_conocidas", "s5_cantidad_encontrar", "s5_incognita"],
+    2: ["s5_receta1_porciones", "s5_receta1_total"],
+    3: ["s5_receta2_total"],
+    4: ["s5_signo_relacion"],
+    5: ["s5_sustitucion_expresiones", "s5_ecuacion_construida", "s5_significado_igual"],
+    6: ["s5_procedimiento", "s5_valor_x", "s5_explicacion_procedimiento"],
+    7: ["s5_sustitucion_receta1_x", "s5_resultado_receta1", "s5_sustitucion_receta2_x", "s5_resultado_receta2", "s5_misma_cantidad", "s5_gramos_cada_receta"],
+    8: ["s5_porciones_final"],
+    9: ["s5_receta_elegida"],
+  };
+  const missingName = (requiredNames[stageIndex] || []).find(
+    (name) => !String(situationFiveProgress.answers[name] ?? "").trim(),
+  );
+  if (missingName) {
+    feedback.textContent = stageIndex === 5 && (missingName === "s5_sustitucion_expresiones" || missingName === "s5_ecuacion_construida")
+      ? "Forma la relación con tus expresiones antes de continuar."
+      : missingName === "s5_receta_elegida"
+        ? "Elige una de las dos recetas antes de continuar."
+        : "Completa todos los campos antes de continuar.";
+    const missingField = form.elements.namedItem(missingName);
+    const focusTarget = missingField?.type === "hidden"
+      ? document.querySelector("[data-action='s5-build-equation']")
+      : missingField?.length ? missingField[0] : missingField;
+    focusTarget?.focus();
+    return;
+  }
+
+  const objectiveName = situationFiveObjectiveForStage(stageIndex);
+  if (objectiveName) {
+    const attempts = situationFiveAttemptList(objectiveName);
+    if (attempts.length >= 2) return;
+    const attempt = {
+      answers: { ...submittedAnswers },
+      correct: situationFiveObjectiveIsCorrect(stageIndex, submittedAnswers),
+    };
+    situationFiveProgress.objectiveAttempts[objectiveName] = [...attempts, attempt];
+    saveSituationFiveProgress();
+    if (!attempt.correct) {
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+  }
+
+  situationFiveProgress.stage = Math.min(11, stageIndex + 1);
+  saveSituationFiveProgress();
+  render();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
 document.addEventListener("submit", async (event) => {
   if (event.target.id === "participant-access-form") {
     event.preventDefault();
@@ -931,7 +3133,7 @@ document.addEventListener("submit", async (event) => {
     button.textContent = "Validando…";
     try {
       await startSession(code, false);
-      setIntroPhase("presentation");
+      setIntroPhase(situationThreeReviewRequested || situationFourReviewRequested ? "game" : "presentation");
       render();
     } catch (error) {
       feedback.textContent = error.message;
@@ -946,6 +3148,83 @@ document.addEventListener("submit", async (event) => {
   const form = event.target;
   if (!form.checkValidity()) {
     form.reportValidity();
+    return;
+  }
+  if (form.dataset.s1Stage) {
+    const stageIndex = Number(form.dataset.s1Stage);
+    const emptyTextField = [...form.querySelectorAll("input:not([type='radio']), textarea")]
+      .find((field) => !field.value.trim());
+    if (emptyTextField) {
+      form.querySelector("#feedback").textContent = "Completa todos los campos antes de continuar.";
+      emptyTextField.focus();
+      return;
+    }
+    const originalAnswers = Object.fromEntries(new FormData(form).entries());
+    if (stageIndex === 3) {
+      situationOneProgress.answers = { ...situationOneProgress.answers, ...originalAnswers };
+      situationOneProgress.stage = 4;
+      saveSituationOneProgress();
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    const compatibilityAnswers = stageIndex === 1
+      ? { total: "120", activities: "4" }
+      : stageIndex === 2
+        ? { minutes: "30" }
+        : { leftMeaning: "activities", rightMeaning: "total", reason: "same" };
+    const answers = stageIndex === 4
+      ? { ...situationOneProgress.answers, ...originalAnswers, ...compatibilityAnswers }
+      : { ...originalAnswers, ...compatibilityAnswers };
+    const stepIndex = stageIndex === 1 ? 0 : stageIndex === 2 ? 1 : 2;
+    const fingerprint = JSON.stringify({ sessionId: researchSession.id, sceneIndex: 0, stepIndex, answers });
+    const savedPending = loadJson(PENDING_ATTEMPT_KEY, null);
+    const pending = savedPending?.fingerprint === fingerprint
+      ? savedPending
+      : { event_id: crypto.randomUUID(), fingerprint };
+    localStorage.setItem(PENDING_ATTEMPT_KEY, JSON.stringify(pending));
+
+    const button = form.querySelector("button[type='submit']");
+    const feedback = form.querySelector("#feedback");
+    button.disabled = true;
+    button.textContent = "Guardando…";
+    collectActiveSlice();
+    flushActivity();
+    try {
+      const result = await apiRequest(`/api/sessions/${researchSession.id}/attempts`, {
+        method: "POST",
+        body: JSON.stringify({ event_id: pending.event_id, scene_index: 0, step_index: stepIndex, answers }),
+      });
+      localStorage.removeItem(PENDING_ATTEMPT_KEY);
+      applyServerState(result.state);
+      if (!result.correct) throw new Error(result.hint || "No fue posible guardar las respuestas.");
+      situationOneProgress.answers = { ...situationOneProgress.answers, ...originalAnswers };
+      situationOneProgress.stage = stageIndex + 1;
+      saveSituationOneProgress();
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (error) {
+      feedback.textContent = error.message;
+      button.disabled = false;
+      button.textContent = "Reintentar y guardar";
+    }
+    return;
+  }
+  if (form.dataset.s2Stage) {
+    await submitSituationTwoStage(form, Number(form.dataset.s2Stage));
+    return;
+  }
+  if (form.dataset.s3Stage) {
+    await submitSituationThreeStage(form, Number(form.dataset.s3Stage));
+    return;
+  }
+  if (form.dataset.s4Stage) {
+    submitSituationFourStage(form, Number(form.dataset.s4Stage));
+    return;
+  }
+  if (form.dataset.s5Stage) {
+    submitSituationFiveStage(form, Number(form.dataset.s5Stage));
     return;
   }
   const sceneIndex = state.currentScene;
@@ -998,11 +3277,72 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
+document.addEventListener("click", (event) => {
+  const symbolButton = event.target.closest("[data-s2-symbol]");
+  if (symbolButton) selectUnknownRepresentation(symbolButton);
+});
+
+document.addEventListener("input", (event) => {
+  const field = event.target;
+  if (!field.name || (field.type === "radio" && !field.checked)) return;
+  const situationThreeForm = field.closest("form[data-s3-stage]");
+  if (situationThreeForm) {
+    situationThreeProgress.answers[field.name] = field.value;
+    saveSituationThreeProgress();
+    return;
+  }
+  const situationFourForm = field.closest("form[data-s4-stage]");
+  if (situationFourForm) {
+    situationFourProgress.answers[field.name] = field.value;
+    if (field.name === "s4_regalo_elegido") situationFourProgress.selectedGift = field.value;
+    saveSituationFourProgress();
+    return;
+  }
+  const situationFiveForm = field.closest("form[data-s5-stage]");
+  if (!situationFiveForm) return;
+  situationFiveProgress.answers[field.name] = field.value;
+  if (field.name === "s5_receta_elegida") situationFiveProgress.selectedRecipe = field.value;
+  saveSituationFiveProgress();
+});
+
+document.addEventListener("keydown", (event) => {
+  const symbolButton = event.target.closest("[data-s2-symbol]");
+  if (!symbolButton) return;
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    selectUnknownRepresentation(symbolButton, true);
+    return;
+  }
+  const navigationKeys = ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "Home", "End"];
+  if (!navigationKeys.includes(event.key)) return;
+  event.preventDefault();
+  const buttons = [...symbolButton.closest("[role='radiogroup']").querySelectorAll("[data-s2-symbol]")];
+  const currentIndex = buttons.indexOf(symbolButton);
+  let nextIndex;
+  if (event.key === "Home") nextIndex = 0;
+  else if (event.key === "End") nextIndex = buttons.length - 1;
+  else if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (currentIndex + 1) % buttons.length;
+  else nextIndex = (currentIndex - 1 + buttons.length) % buttons.length;
+  selectUnknownRepresentation(buttons[nextIndex], true);
+});
+
 document.addEventListener("click", async (event) => {
   const actionElement = event.target.closest("[data-action]");
   if (!actionElement) return;
   const action = actionElement.dataset.action;
   if (action === "show-access") {
+    if (researchSession) {
+      if (situationFourReviewRequested && situationFourProgress.stage === 10) {
+        resetSituationFourProgress();
+      }
+      if (situationFiveReviewRequested && situationFiveProgress.stage === 11) {
+        resetSituationFiveProgress();
+      }
+      setIntroPhase("game");
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
     introPhase = "access";
     render();
     return;
@@ -1017,6 +3357,155 @@ document.addEventListener("click", async (event) => {
     setIntroPhase("game");
     render();
     window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s1-start") {
+    situationOneProgress.stage = 1;
+    saveSituationOneProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s1-show-agenda") {
+    situationOneProgress.stage = 6;
+    saveSituationOneProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "start-s2") {
+    situationOneProgress.stage = 7;
+    saveSituationOneProgress();
+    loadSituationTwoProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s2-next") {
+    situationTwoProgress.stage += 1;
+    saveSituationTwoProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s3-next") {
+    situationThreeProgress.stage = Math.min(9, situationThreeProgress.stage + 1);
+    saveSituationThreeProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "start-s4") {
+    resetSituationFourProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "start-s5") {
+    loadSituationFiveProgress();
+    ensureSituationFiveProgress();
+    setIntroPhase("game");
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s4-next") {
+    persistSituationFourDraft();
+    situationFourProgress.stage = Math.min(10, situationFourProgress.stage + 1);
+    saveSituationFourProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s5-next") {
+    persistSituationFiveDraft();
+    situationFiveProgress.stage = Math.min(11, situationFiveProgress.stage + 1);
+    saveSituationFiveProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s5-build-equation") {
+    persistSituationFiveDraft();
+    const expressionOne = String(situationFiveProgress.answers.s5_receta1_total || "");
+    const sign = String(situationFiveProgress.answers.s5_signo_relacion || "");
+    const expressionTwo = String(situationFiveProgress.answers.s5_receta2_total || "");
+    const relation = `${expressionOne} ${sign} ${expressionTwo}`;
+    situationFiveProgress.answers.s5_sustitucion_expresiones = relation;
+    situationFiveProgress.answers.s5_ecuacion_construida = relation;
+    saveSituationFiveProgress();
+    render();
+    return;
+  }
+  if (action === "s3-continue-after-attempts") {
+    const objectiveName = situationThreeProgress.stage === 7 ? "s3_resolver" : "s3_comprobacion";
+    const attempts = situationThreeAttemptList(objectiveName);
+    if (attempts.length < 2 || attempts.some((attempt) => attempt.correct)) return;
+    situationThreeProgress.stage = Math.min(9, situationThreeProgress.stage + 1);
+    saveSituationThreeProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s3-return-home") {
+    persistSituationThreeDraft();
+    setIntroPhase("home");
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s4-continue-after-attempts") {
+    const objectiveName = situationFourObjectiveForStage(situationFourProgress.stage);
+    const attempts = objectiveName ? situationFourAttemptList(objectiveName) : [];
+    if (attempts.length < 2 || attempts.some((attempt) => attempt.correct)) return;
+    situationFourProgress.stage = Math.min(10, situationFourProgress.stage + 1);
+    saveSituationFourProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s4-return-home") {
+    persistSituationFourDraft();
+    setIntroPhase("home");
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s5-continue-after-attempts") {
+    const objectiveName = situationFiveObjectiveForStage(situationFiveProgress.stage);
+    const attempts = objectiveName ? situationFiveAttemptList(objectiveName) : [];
+    if (attempts.length < 2 || attempts.some((attempt) => attempt.correct)) return;
+    persistSituationFiveDraft();
+    situationFiveProgress.stage = Math.min(11, situationFiveProgress.stage + 1);
+    saveSituationFiveProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s5-return-home") {
+    persistSituationFiveDraft();
+    setIntroPhase("home");
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s1-restart") {
+    const code = researchSession.code;
+    actionElement.disabled = true;
+    actionElement.textContent = "Preparando revisión…";
+    collectActiveSlice();
+    await flushActivity();
+    try {
+      await startSession(code, false);
+      setIntroPhase("game");
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      showToast("La revisión de la Situación 1 está lista.");
+    } catch (error) {
+      showToast(error.message);
+      actionElement.disabled = false;
+      actionElement.textContent = "Revisar de nuevo la Situación 1";
+    }
     return;
   }
   if (action === "next-question" || action === "continue") {
@@ -1076,13 +3565,25 @@ const initialize = async () => {
     return;
   }
   renderLoading();
+  loadSituationFiveProgress();
   try {
     const data = await apiRequest(`/api/sessions/${researchSession.id}/state`);
     applyServerState(data.state);
+    loadSituationOneProgress();
+    loadSituationTwoProgress();
+    loadSituationThreeProgress();
+    loadSituationFourProgress();
+    loadSituationFiveProgress();
     beginActivityTracking();
     render();
     flushActivity();
   } catch {
+    if (hasSituationFiveProgress) {
+      introPhase = "game";
+      beginActivityTracking();
+      render();
+      return;
+    }
     localStorage.removeItem(SESSION_STORAGE_KEY);
     researchSession = null;
     state = { ...defaultState };

@@ -1,4 +1,4 @@
-import { createReadStream, statSync } from "node:fs";
+import { createReadStream, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,26 @@ const portFlagIndex = process.argv.indexOf("--port");
 const requestedPort = portFlagIndex >= 0 ? process.argv[portFlagIndex + 1] : process.env.PORT;
 const port = Number.parseInt(requestedPort || "4173", 10);
 const shouldOpen = process.argv.includes("--open");
+
+const visualReviewSession = {
+  id: "visual-review-s4",
+  token: "visual-review-token",
+  code: "REVIEW4",
+  introPhase: "game",
+};
+
+const visualReviewState = {
+  session_id: visualReviewSession.id,
+  participant_code: visualReviewSession.code,
+  application_name: "Revisión visual",
+  sequence: 1,
+  is_primary: false,
+  status: "in_progress",
+  current_scene: 3,
+  current_step: 0,
+  completed_scenes: [0, 1, 2],
+  metrics: null,
+};
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   console.error("El puerto debe ser un número entre 1 y 65535.");
@@ -44,9 +64,37 @@ const openBrowser = (url) => {
   child.unref();
 };
 
+const sendJson = (response, statusCode, payload) => {
+  response.writeHead(statusCode, {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json; charset=utf-8",
+  });
+  response.end(JSON.stringify(payload));
+};
+
+const visualReviewBootstrap = () => `
+    <script>
+      localStorage.setItem(
+        "tadeo-research-session-v1",
+        ${JSON.stringify(JSON.stringify(visualReviewSession))}
+      );
+    </script>`;
+
 const server = createServer((request, response) => {
   try {
     const requestUrl = new URL(request.url || "/", `http://${host}:${port}`);
+    const isVisualReview = requestUrl.searchParams.get("testSession") === "visual-review";
+
+    if (requestUrl.pathname === `/api/sessions/${visualReviewSession.id}/state`) {
+      sendJson(response, 200, { state: visualReviewState });
+      return;
+    }
+
+    if (requestUrl.pathname === `/api/sessions/${visualReviewSession.id}/activity`) {
+      sendJson(response, 200, { recorded: true });
+      return;
+    }
+
     const pathname = decodeURIComponent(requestUrl.pathname);
     const relativePath = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
     let filePath = resolve(projectRoot, normalize(relativePath));
@@ -59,9 +107,24 @@ const server = createServer((request, response) => {
 
     if (statSync(filePath).isDirectory()) filePath = join(filePath, "index.html");
 
+    const contentType = mimeTypes.get(extname(filePath).toLowerCase()) || "application/octet-stream";
+
+    if (isVisualReview && filePath === resolve(projectRoot, "index.html")) {
+      const html = readFileSync(filePath, "utf8").replace(
+        '<script type="module" src="./js/app.js"></script>',
+        `${visualReviewBootstrap()}\n    <script type="module" src="./js/app.js"></script>`,
+      );
+      response.writeHead(200, {
+        "Cache-Control": "no-store",
+        "Content-Type": contentType,
+      });
+      response.end(html);
+      return;
+    }
+
     response.writeHead(200, {
       "Cache-Control": "no-store",
-      "Content-Type": mimeTypes.get(extname(filePath).toLowerCase()) || "application/octet-stream",
+      "Content-Type": contentType,
     });
 
     createReadStream(filePath).on("error", () => {
