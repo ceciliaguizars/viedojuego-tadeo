@@ -1,6 +1,9 @@
-const SESSION_STORAGE_KEY = "tadeo-research-session-v1";
+const LEGACY_SESSION_STORAGE_KEY = "tadeo-research-session-v1";
 const PENDING_ATTEMPT_KEY = "tadeo-pending-attempt-v1";
 const ACTIVITY_QUEUE_KEY = "tadeo-activity-queue-v1";
+const SESSION_STORAGE_KEY = "tadeo-final-session-v2";
+const OUTBOX_STORAGE_KEY = "tadeo-final-outbox-v2";
+const EXPERIENCE_VERSION = "tadeo-final-1";
 const SITUATION_ONE_PROGRESS_KEY = "tadeo-situation-one-progress-v1";
 const SITUATION_TWO_PROGRESS_KEY = "tadeo-situation-two-progress-v1";
 const SITUATION_THREE_PROGRESS_KEY = "tadeo-situation-three-progress-v1";
@@ -660,12 +663,16 @@ const situationOneReviewRequested = new URLSearchParams(window.location.search).
 const situationThreeReviewRequested = new URLSearchParams(window.location.search).get("situacion") === "3";
 const situationFourReviewRequested = new URLSearchParams(window.location.search).get("situacion") === "4";
 const situationFiveReviewRequested = new URLSearchParams(window.location.search).get("situacion") === "5";
+const reviewSituation = situationOneReviewRequested
+  ? 1
+  : situationThreeReviewRequested ? 3 : situationFourReviewRequested ? 4 : situationFiveReviewRequested ? 5 : null;
+const isReviewMode = reviewSituation !== null;
 
 const defaultState = { currentScene: 0, currentStep: 0, completedScenes: [], unlocked: [], metrics: null };
 let state = { ...defaultState };
 let researchSession = loadJson(SESSION_STORAGE_KEY, null);
 let introPhase = researchSession?.introPhase || (researchSession ? "game" : "home");
-let activityQueue = loadJson(ACTIVITY_QUEUE_KEY, []);
+let outbox = loadJson(OUTBOX_STORAGE_KEY, []);
 let situationOneProgress = { stage: 0, answers: {} };
 let hasSituationOneProgress = false;
 let situationTwoProgress = { stage: 0, answers: {} };
@@ -676,7 +683,7 @@ let hasSituationFourProgress = false;
 let situationFiveProgress = { stage: 0, answers: {}, objectiveAttempts: {}, selectedRecipe: "" };
 let hasSituationFiveProgress = false;
 let activeStartedAt = null;
-let activitySending = false;
+let outboxSending = false;
 let toastTimer;
 
 function loadJson(key, fallback) {
@@ -688,8 +695,11 @@ function loadJson(key, fallback) {
   }
 }
 
-const saveResearchSession = () => localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(researchSession));
-const saveActivityQueue = () => localStorage.setItem(ACTIVITY_QUEUE_KEY, JSON.stringify(activityQueue));
+const saveResearchSession = () => {
+  if (!researchSession || isReviewMode) return;
+  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(researchSession));
+};
+const saveOutbox = () => localStorage.setItem(OUTBOX_STORAGE_KEY, JSON.stringify(outbox));
 
 const loadSituationOneProgress = () => {
   const allProgress = loadJson(SITUATION_ONE_PROGRESS_KEY, {});
@@ -708,6 +718,7 @@ const saveSituationOneProgress = () => {
   allProgress[researchSession.id] = situationOneProgress;
   localStorage.setItem(SITUATION_ONE_PROGRESS_KEY, JSON.stringify(allProgress));
   hasSituationOneProgress = true;
+  queueProgressSnapshot();
 };
 
 const loadSituationTwoProgress = () => {
@@ -729,6 +740,7 @@ const saveSituationTwoProgress = () => {
   const allProgress = loadJson(SITUATION_TWO_PROGRESS_KEY, {});
   allProgress[researchSession.id] = situationTwoProgress;
   localStorage.setItem(SITUATION_TWO_PROGRESS_KEY, JSON.stringify(allProgress));
+  queueProgressSnapshot();
 };
 
 const situationThreeProgressId = () => {
@@ -757,6 +769,7 @@ const saveSituationThreeProgress = () => {
   allProgress[progressId] = situationThreeProgress;
   localStorage.setItem(SITUATION_THREE_PROGRESS_KEY, JSON.stringify(allProgress));
   hasSituationThreeProgress = true;
+  queueProgressSnapshot();
 };
 
 const situationFourProgressId = () => {
@@ -787,6 +800,7 @@ const saveSituationFourProgress = () => {
   allProgress[progressId] = situationFourProgress;
   localStorage.setItem(SITUATION_FOUR_PROGRESS_KEY, JSON.stringify(allProgress));
   hasSituationFourProgress = true;
+  queueProgressSnapshot();
 };
 
 const resetSituationFourProgress = () => {
@@ -827,6 +841,7 @@ const saveSituationFiveProgress = () => {
   allProgress[progressId] = situationFiveProgress;
   localStorage.setItem(SITUATION_FIVE_PROGRESS_KEY, JSON.stringify(allProgress));
   hasSituationFiveProgress = true;
+  queueProgressSnapshot();
 };
 
 const ensureSituationFiveProgress = () => {
@@ -847,11 +862,39 @@ const setIntroPhase = (phase) => {
   introPhase = phase;
   if (researchSession) {
     researchSession.introPhase = phase;
+    if (phase === "game") {
+      const resumedScene = sceneForScreen(currentScreenForProgress());
+      state.currentScene = resumedScene;
+      state.completedScenes = Array.from({ length: Math.min(resumedScene, 5) }, (_, index) => index);
+      state.unlocked = [...state.completedScenes];
+    }
     saveResearchSession();
+    queueProgressSnapshot();
   }
 };
 
+const sceneForScreen = (screen) => {
+  if (screen >= 54) return 5;
+  if (screen >= 42) return 4;
+  if (screen >= 31) return 3;
+  if (screen >= 21) return 2;
+  if (screen >= 12) return 1;
+  return 0;
+};
+
 const applyServerState = (serverState) => {
+  if (serverState.experience_version === EXPERIENCE_VERSION) {
+    const currentScreen = Number(serverState.current_screen) || 1;
+    const currentScene = sceneForScreen(currentScreen);
+    state = {
+      currentScene,
+      currentStep: 0,
+      completedScenes: Array.from({ length: Math.min(currentScene, 5) }, (_, index) => index),
+      unlocked: Array.from({ length: Math.min(currentScene, 5) }, (_, index) => index),
+      metrics: null,
+    };
+    return;
+  }
   state = {
     currentScene: serverState.current_scene,
     currentStep: serverState.current_step,
@@ -872,8 +915,229 @@ const apiRequest = async (path, options = {}, token = researchSession?.token) =>
     throw new Error("No se pudo conectar con el servidor. Revisa la red y vuelve a intentarlo.");
   }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.detail || "El servidor no pudo completar la solicitud.");
+  if (!response.ok) {
+    const error = new Error(data.detail || "El servidor no pudo completar la solicitud.");
+    error.status = response.status;
+    throw error;
+  }
   return data;
+};
+
+const currentScreenForProgress = () => {
+  if (introPhase === "home") return 1;
+  if (introPhase === "access") return 2;
+  if (introPhase === "presentation") return 3;
+  if (introPhase === "agenda") return 4;
+  if (situationFiveReviewRequested || hasSituationFiveProgress) return 42 + situationFiveProgress.stage;
+  if (situationFourReviewRequested || hasSituationFourProgress) return 31 + situationFourProgress.stage;
+  if (situationThreeReviewRequested || hasSituationThreeProgress) return 21 + situationThreeProgress.stage;
+  if (state.currentScene === 1 || situationOneProgress.stage >= 7) return 12 + situationTwoProgress.stage;
+  return 5 + situationOneProgress.stage;
+};
+
+const progressSnapshot = () => ({
+  intro_phase: introPhase,
+  has_situation_one_progress: hasSituationOneProgress,
+  has_situation_three_progress: hasSituationThreeProgress,
+  has_situation_four_progress: hasSituationFourProgress,
+  has_situation_five_progress: hasSituationFiveProgress,
+  situation_one: situationOneProgress,
+  situation_two: situationTwoProgress,
+  situation_three: situationThreeProgress,
+  situation_four: situationFourProgress,
+  situation_five: situationFiveProgress,
+});
+
+const persistProgressCaches = () => {
+  if (!researchSession?.id || isReviewMode) return;
+  const stores = [
+    [SITUATION_ONE_PROGRESS_KEY, researchSession.id, situationOneProgress],
+    [SITUATION_TWO_PROGRESS_KEY, researchSession.id, situationTwoProgress],
+    [SITUATION_THREE_PROGRESS_KEY, `${researchSession.id}:story`, situationThreeProgress],
+    [SITUATION_FOUR_PROGRESS_KEY, `${researchSession.id}:story`, situationFourProgress],
+    [SITUATION_FIVE_PROGRESS_KEY, `${researchSession.id}:story`, situationFiveProgress],
+  ];
+  stores.forEach(([key, progressId, value]) => {
+    const allProgress = loadJson(key, {});
+    allProgress[progressId] = value;
+    localStorage.setItem(key, JSON.stringify(allProgress));
+  });
+};
+
+const applyProgressSnapshot = (snapshot) => {
+  if (!snapshot || typeof snapshot !== "object" || !Object.keys(snapshot).length) return;
+  introPhase = typeof snapshot.intro_phase === "string" ? snapshot.intro_phase : introPhase;
+  const restored = (name, fallback) => snapshot[name] && typeof snapshot[name] === "object"
+    ? snapshot[name]
+    : fallback;
+  situationOneProgress = restored("situation_one", situationOneProgress);
+  situationTwoProgress = restored("situation_two", situationTwoProgress);
+  situationThreeProgress = restored("situation_three", situationThreeProgress);
+  situationFourProgress = restored("situation_four", situationFourProgress);
+  situationFiveProgress = restored("situation_five", situationFiveProgress);
+  hasSituationOneProgress = snapshot.has_situation_one_progress === true
+    || Number(situationOneProgress.stage) > 0
+    || Object.keys(situationOneProgress.answers || {}).length > 0;
+  hasSituationThreeProgress = snapshot.has_situation_three_progress === true
+    || Number(situationThreeProgress.stage) > 0
+    || Object.keys(situationThreeProgress.answers || {}).length > 0;
+  hasSituationFourProgress = snapshot.has_situation_four_progress === true
+    || Number(situationFourProgress.stage) > 0
+    || Object.keys(situationFourProgress.answers || {}).length > 0;
+  hasSituationFiveProgress = snapshot.has_situation_five_progress === true
+    || Number(situationFiveProgress.stage) > 0
+    || Object.keys(situationFiveProgress.answers || {}).length > 0;
+  const recoveredScene = sceneForScreen(currentScreenForProgress());
+  state.currentScene = recoveredScene;
+  state.completedScenes = Array.from({ length: Math.min(recoveredScene, 5) }, (_, index) => index);
+  state.unlocked = [...state.completedScenes];
+  researchSession.introPhase = introPhase;
+  saveResearchSession();
+  persistProgressCaches();
+};
+
+const enqueueOutbox = (type, path, method, payload) => {
+  if (!researchSession?.id || isReviewMode || researchSession.completedAt) return null;
+  const item = {
+    queueId: crypto.randomUUID(),
+    type,
+    sessionId: researchSession.id,
+    token: researchSession.token,
+    path,
+    method,
+    payload,
+  };
+  outbox.push(item);
+  saveOutbox();
+  flushOutbox();
+  return item;
+};
+
+const queueProgressSnapshot = () => {
+  if (!researchSession?.id || isReviewMode || researchSession.completedAt) return;
+  const nextRevision = (Number(researchSession.progressRevision) || 0) + 1;
+  researchSession.progressRevision = nextRevision;
+  saveResearchSession();
+  outbox = outbox.filter(
+    (item) => !(item.type === "progress" && item.sessionId === researchSession.id),
+  );
+  const payload = {
+    current_screen: currentScreenForProgress(),
+    progress_revision: nextRevision,
+    progress_snapshot: JSON.parse(JSON.stringify(progressSnapshot())),
+  };
+  enqueueOutbox(
+    "progress",
+    `/api/v2/sessions/${researchSession.id}/progress`,
+    "PUT",
+    payload,
+  );
+};
+
+const objectiveFieldIds = new Set([
+  "s1_explora_a", "s1_explora_b", "s1_explora_c", "s1_misma_cantidad",
+  "s2_dias_alimento", "s2_dia_comprar_alimento",
+  "s3_valor_x", "s3_cuaderno_elegido", "s3_se_mantiene_igualdad",
+  "s4_valor_x", "s4_se_mantiene_igualdad",
+  "s4_registro_ingreso1", "s4_registro_ingreso2", "s4_registro_ingreso3", "s4_registro_ingreso4",
+  "s5_signo_relacion", "s5_valor_x", "s5_resultado_receta1", "s5_resultado_receta2",
+  "s5_misma_cantidad", "s5_gramos_cada_receta", "s5_porciones_final",
+]);
+
+const numericObjectiveFieldIds = new Set([
+  "s1_explora_a", "s1_explora_b", "s1_explora_c",
+  "s2_dias_alimento", "s2_dia_comprar_alimento", "s3_valor_x", "s4_valor_x",
+  "s4_registro_ingreso1", "s4_registro_ingreso2", "s4_registro_ingreso3", "s4_registro_ingreso4",
+  "s5_valor_x", "s5_resultado_receta1", "s5_resultado_receta2", "s5_gramos_cada_receta",
+  "s5_porciones_final",
+]);
+
+const narrativeChoiceFieldIds = new Set([
+  "s2_representacion_incognita",
+  "s3_representacion_incognita",
+  "s4_regalo_elegido",
+  "s5_receta_elegida",
+]);
+
+const mathFieldId = (fieldId) => [
+  "igualdad", "ecuacion", "representacion_breve", "cinco_cuadernos", "cuatro_ingresos",
+  "procedimiento", "sustitucion", "receta1_porciones", "receta1_total", "receta2_total",
+].some((part) => fieldId.includes(part)) && !fieldId.includes("explicacion");
+
+const fieldTypeFor = (fieldId) => {
+  if (objectiveFieldIds.has(fieldId)) {
+    return numericObjectiveFieldIds.has(fieldId) ? "objective_numeric" : "objective_choice";
+  }
+  if (narrativeChoiceFieldIds.has(fieldId)) return "narrative_choice";
+  if (mathFieldId(fieldId)) return "math_expression";
+  return "open_text";
+};
+
+const queueResponseSubmission = ({
+  situation,
+  screen,
+  activityId,
+  answers,
+  validationResult = null,
+  fieldValidation = {},
+}) => {
+  if (!answers || !Object.keys(answers).length || isReviewMode) return;
+  const values = Object.entries(answers).map(([fieldId, value], orderIndex) => ({
+    field_id: fieldId,
+    field_type: fieldTypeFor(fieldId),
+    literal_value: String(value ?? ""),
+    order_index: orderIndex,
+    validation_result: Object.hasOwn(fieldValidation, fieldId) ? fieldValidation[fieldId] : null,
+  }));
+  const eventId = crypto.randomUUID();
+  enqueueOutbox(
+    "response",
+    `/api/v2/sessions/${researchSession.id}/responses`,
+    "POST",
+    {
+      event_id: eventId,
+      situation,
+      screen,
+      activity_id: activityId,
+      validation_result: validationResult,
+      client_created_at: new Date().toISOString(),
+      order_index: screen,
+      values,
+    },
+  );
+};
+
+const queueSessionCompletion = (completionEventId) => enqueueOutbox(
+  "complete",
+  `/api/v2/sessions/${researchSession.id}/complete`,
+  "POST",
+  { completion_event_id: completionEventId },
+);
+
+const flushOutbox = async () => {
+  if (outboxSending || !outbox.length || isReviewMode) return;
+  outboxSending = true;
+  try {
+    while (outbox.length) {
+      const item = outbox[0];
+      const result = await apiRequest(item.path, {
+        method: item.method,
+        body: JSON.stringify(item.payload),
+        keepalive: item.type === "activity",
+      }, item.token);
+      if (item.type === "complete" && result.state?.completed_at) {
+        researchSession.completedAt = result.state.completed_at;
+        activeStartedAt = null;
+        saveResearchSession();
+      }
+      outbox = outbox.filter((queued) => queued.queueId !== item.queueId);
+      saveOutbox();
+    }
+  } catch {
+    // La outbox se conserva completa y reintenta con el mismo event_id o revisión.
+  } finally {
+    outboxSending = false;
+  }
 };
 
 const agendaCompleted = () => state.completedScenes.filter((sceneIndex) => sceneIndex > 0).length;
@@ -1369,6 +1633,7 @@ const renderSituationTwoAgenda = () => {
       <p><strong>Pendiente futuro</strong>Comprar alimento para el perro el día ${escapeHtml(situationTwoProgress.answers.s2_dia_comprar_alimento || "2")}.</p>
     </aside>
     <p class="next-activity"><strong>Siguiente actividad:</strong> Ir a la papelería.</p>
+    <button class="primary-button" type="button" data-action="start-s3">CONTINUAR <span aria-hidden="true">→</span></button>
   `, "s1-agenda-panel s2-agenda-panel");
 };
 
@@ -2554,7 +2819,7 @@ const render = () => {
   else if (state.currentScene === 0 || (hasSituationOneProgress && situationOneProgress.stage < 7)) renderSituationOne();
   else if (state.currentScene === 2 && hasSituationThreeProgress) renderSituationThree();
   else if (state.currentScene === 3) renderSituationFour();
-  else if (state.currentScene === 1 || situationTwoProgress.stage === 8) renderSituationTwo();
+  else if (state.currentScene === 1 || (situationTwoProgress.stage === 8 && !hasSituationThreeProgress)) renderSituationTwo();
   else if (state.currentScene === 4) {
     ensureSituationFiveProgress();
     renderSituationFive();
@@ -2565,55 +2830,58 @@ const render = () => {
 };
 
 const collectActiveSlice = () => {
-  if (!researchSession || document.visibilityState !== "visible" || activeStartedAt === null) return;
+  if (!researchSession || isReviewMode || researchSession.completedAt || document.visibilityState !== "visible" || activeStartedAt === null) return;
   const seconds = (performance.now() - activeStartedAt) / 1000;
   activeStartedAt = performance.now();
   if (seconds < 0.2) return;
-  activityQueue.push({
-    sessionId: researchSession.id,
-    token: researchSession.token,
-    event_id: crypto.randomUUID(),
-    active_seconds: Math.min(seconds, 120),
-  });
-  saveActivityQueue();
+  const eventId = crypto.randomUUID();
+  enqueueOutbox(
+    "activity",
+    `/api/v2/sessions/${researchSession.id}/activity`,
+    "POST",
+    { event_id: eventId, active_seconds: Math.min(seconds, 120) },
+  );
 };
 
 const flushActivity = async () => {
-  if (activitySending || !activityQueue.length) return;
-  activitySending = true;
-  try {
-    while (activityQueue.length) {
-      const item = activityQueue[0];
-      await apiRequest(`/api/sessions/${item.sessionId}/activity`, {
-        method: "POST",
-        body: JSON.stringify({ event_id: item.event_id, active_seconds: item.active_seconds }),
-        keepalive: true,
-      }, item.token);
-      activityQueue.shift();
-      saveActivityQueue();
-    }
-  } catch {
-    // La cola permanece localmente y se reintenta en el siguiente pulso.
-  } finally {
-    activitySending = false;
-  }
+  await flushOutbox();
 };
 
 const beginActivityTracking = () => {
-  activeStartedAt = document.visibilityState === "visible" ? performance.now() : null;
+  activeStartedAt = !isReviewMode && document.visibilityState === "visible" ? performance.now() : null;
 };
 
-const startSession = async (code, allowResume = true) => {
+const startSession = async (code, allowResume = true, forceNew = false) => {
   const previous = allowResume && researchSession?.code === code ? researchSession : null;
-  const data = await apiRequest("/api/sessions", {
+  const data = await apiRequest("/api/v2/sessions", {
     method: "POST",
     body: JSON.stringify({
       code,
       resume_session_id: previous?.id || null,
       resume_token: previous?.token || null,
+      force_new: forceNew,
     }),
   }, null);
-  researchSession = { id: data.state.session_id, token: data.session_token, code: data.state.participant_code, introPhase: "game" };
+  const previousRevision = previous?.id === data.state.session_id
+    ? Number(previous.progressRevision) || 0
+    : 0;
+  const pendingProgress = [...outbox].reverse().find(
+    (item) => item.type === "progress" && item.sessionId === data.state.session_id,
+  );
+  const pendingRevision = Number(pendingProgress?.payload?.progress_revision) || 0;
+  researchSession = {
+    id: data.state.session_id,
+    token: data.session_token,
+    code: data.state.participant_code,
+    introPhase: "game",
+    experienceVersion: data.state.experience_version,
+    progressRevision: Math.max(previousRevision, pendingRevision, Number(data.state.progress_revision) || 0),
+    completedAt: data.state.completed_at || null,
+  };
+  outbox = outbox.map((item) => item.sessionId === researchSession.id
+    ? { ...item, token: researchSession.token }
+    : item);
+  saveOutbox();
   saveResearchSession();
   applyServerState(data.state);
   loadSituationOneProgress();
@@ -2621,7 +2889,13 @@ const startSession = async (code, allowResume = true) => {
   loadSituationThreeProgress();
   loadSituationFourProgress();
   loadSituationFiveProgress();
+  if (pendingRevision > (Number(data.state.progress_revision) || 0)) {
+    applyProgressSnapshot(pendingProgress.payload.progress_snapshot);
+  } else if ((Number(data.state.progress_revision) || 0) >= previousRevision) {
+    applyProgressSnapshot(data.state.progress_snapshot);
+  }
   beginActivityTracking();
+  flushOutbox();
 };
 
 const completeCurrentScene = (sceneIndex) => {
@@ -2652,77 +2926,40 @@ const submitSituationTwoStage = async (form, stageIndex) => {
     return;
   }
 
-  if (stageIndex === 2 && originalAnswers.s2_dias_alimento.trim() !== "3") {
+  collectActiveSlice();
+  let validationResult = null;
+  let fieldValidation = {};
+  if (stageIndex === 2) {
+    validationResult = originalAnswers.s2_dias_alimento.trim() === "3";
+    fieldValidation = { s2_dias_alimento: validationResult };
+  } else if (stageIndex === 7) {
+    validationResult = originalAnswers.s2_dia_comprar_alimento.trim() === "2";
+    fieldValidation = { s2_dia_comprar_alimento: validationResult };
+  }
+  queueResponseSubmission({
+    situation: 2,
+    screen: 12 + stageIndex,
+    activityId: `s2_stage_${stageIndex}`,
+    answers: originalAnswers,
+    validationResult,
+    fieldValidation,
+  });
+
+  if (stageIndex === 2 && !validationResult) {
     feedback.textContent = "Pista: ¿cuántos grupos de 300 g caben en 900 g?";
     form.querySelector("[name='s2_dias_alimento']").focus();
     return;
   }
-  if (stageIndex === 7 && originalAnswers.s2_dia_comprar_alimento.trim() !== "2") {
+  if (stageIndex === 7 && !validationResult) {
     feedback.textContent = "Recuerda: la compra debe hacerse un día antes de que terminen los 3 días de alimento.";
     form.querySelector("[name='s2_dia_comprar_alimento']").focus();
     return;
   }
 
-  if (stageIndex === 3 || stageIndex === 4) {
-    situationTwoProgress.stage = stageIndex + 1;
-    saveSituationTwoProgress();
-    render();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-    return;
-  }
-
-  const requestByStage = {
-    1: {
-      stepIndex: 0,
-      compatibility: { totalFood: "900", dailyFood: "300", unknown: "days" },
-    },
-    2: {
-      stepIndex: 1,
-      compatibility: { days: originalAnswers.s2_dias_alimento, repeatedSum: "300 + 300 + 300 = 900" },
-    },
-    5: {
-      stepIndex: 2,
-      compatibility: {
-        symbol: situationTwoProgress.answers.s2_representacion_incognita,
-        symbolMeaning: "days",
-      },
-    },
-    7: {
-      stepIndex: 3,
-      compatibility: { buyDay: originalAnswers.s2_dia_comprar_alimento },
-    },
-  };
-  const request = requestByStage[stageIndex];
-  const answers = { ...situationTwoProgress.answers, ...request.compatibility };
-  const fingerprint = JSON.stringify({ sessionId: researchSession.id, sceneIndex: 1, stepIndex: request.stepIndex, answers });
-  const savedPending = loadJson(PENDING_ATTEMPT_KEY, null);
-  const pending = savedPending?.fingerprint === fingerprint
-    ? savedPending
-    : { event_id: crypto.randomUUID(), fingerprint };
-  localStorage.setItem(PENDING_ATTEMPT_KEY, JSON.stringify(pending));
-
-  const button = form.querySelector("button[type='submit']");
-  button.disabled = true;
-  button.textContent = "Guardando…";
-  collectActiveSlice();
-  flushActivity();
-  try {
-    const result = await apiRequest(`/api/sessions/${researchSession.id}/attempts`, {
-      method: "POST",
-      body: JSON.stringify({ event_id: pending.event_id, scene_index: 1, step_index: request.stepIndex, answers }),
-    });
-    localStorage.removeItem(PENDING_ATTEMPT_KEY);
-    applyServerState(result.state);
-    if (!result.correct) throw new Error(result.hint || "No fue posible guardar las respuestas.");
-    situationTwoProgress.stage = stageIndex + 1;
-    saveSituationTwoProgress();
-    render();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  } catch (error) {
-    feedback.textContent = error.message;
-    button.disabled = false;
-    button.textContent = "Reintentar y guardar";
-  }
+  situationTwoProgress.stage = stageIndex + 1;
+  saveSituationTwoProgress();
+  render();
+  window.scrollTo({ top: 0, behavior: "smooth" });
 };
 
 const selectSituationTwoSymbol = (button, moveFocus = false) => {
@@ -2781,54 +3018,9 @@ const persistSituationThreeDraft = () => {
   saveSituationThreeProgress();
 };
 
-const submitSituationThreeRemote = async (stageIndex, submittedAnswers) => {
-  const stepByStage = { 1: 0, 5: 1, 7: 2, 8: 3 };
-  const stepIndex = stepByStage[stageIndex];
-  if (
-    situationThreeReviewRequested
-    || stepIndex === undefined
-    || state.currentScene !== 2
-    || state.currentStep !== stepIndex
-  ) return null;
-
-  const compatibilityByStage = {
-    1: { notebookCount: "5", colorsPrice: "45", unknown: "notebookPrice" },
-    5: { notebooksExpression: "5x", equation: "5x + 45 = 195" },
-    7: {
-      price: submittedAnswers.s3_valor_x,
-      notebook: submittedAnswers.s3_cuaderno_elegido === "A"
-        ? "30"
-        : submittedAnswers.s3_cuaderno_elegido === "B" ? "35" : "40",
-    },
-    8: {
-      total: "195",
-      isEqual: submittedAnswers.s3_se_mantiene_igualdad === "Sí" ? "yes" : "no",
-    },
-  };
-  const answers = {
-    ...situationThreeProgress.answers,
-    ...submittedAnswers,
-    ...compatibilityByStage[stageIndex],
-  };
-  const fingerprint = JSON.stringify({ sessionId: researchSession.id, sceneIndex: 2, stepIndex, answers });
-  const savedPending = loadJson(PENDING_ATTEMPT_KEY, null);
-  const pending = savedPending?.fingerprint === fingerprint
-    ? savedPending
-    : { event_id: crypto.randomUUID(), fingerprint };
-  localStorage.setItem(PENDING_ATTEMPT_KEY, JSON.stringify(pending));
-  collectActiveSlice();
-  flushActivity();
-  const result = await apiRequest(`/api/sessions/${researchSession.id}/attempts`, {
-    method: "POST",
-    body: JSON.stringify({ event_id: pending.event_id, scene_index: 2, step_index: stepIndex, answers }),
-  });
-  localStorage.removeItem(PENDING_ATTEMPT_KEY);
-  applyServerState(result.state);
-  return result;
-};
-
 const submitSituationThreeStage = async (form, stageIndex) => {
   const feedback = form.querySelector("#feedback");
+  const button = form.querySelector("button[type='submit']");
   let submittedAnswers = Object.fromEntries(new FormData(form).entries());
   situationThreeProgress.answers = { ...situationThreeProgress.answers, ...submittedAnswers };
   saveSituationThreeProgress();
@@ -2857,7 +3049,6 @@ const submitSituationThreeStage = async (form, stageIndex) => {
     return;
   }
 
-  const button = form.querySelector("button[type='submit']");
   const objectiveName = stageIndex === 7 ? "s3_resolver" : stageIndex === 8 ? "s3_comprobacion" : null;
   let attempt = null;
   if (objectiveName) {
@@ -2875,44 +3066,24 @@ const submitSituationThreeStage = async (form, stageIndex) => {
       saveSituationThreeProgress();
     }
   }
-
-  if (button) {
-    button.disabled = true;
-    button.textContent = "Guardando…";
+  collectActiveSlice();
+  const fieldValidation = {};
+  if (stageIndex === 7) {
+    fieldValidation.s3_valor_x = attempt.correct;
+    fieldValidation.s3_cuaderno_elegido = attempt.correct;
+  } else if (stageIndex === 8) {
+    fieldValidation.s3_se_mantiene_igualdad = attempt.correct;
   }
-  let remoteResult = null;
-  try {
-    if (attempt && !situationThreeReviewRequested && state.currentScene === 2) {
-      attempt.syncPending = true;
-      saveSituationThreeProgress();
-    }
-    remoteResult = await submitSituationThreeRemote(stageIndex, submittedAnswers);
-    if (attempt) {
-      attempt.syncPending = false;
-      saveSituationThreeProgress();
-    }
-  } catch (error) {
-    if (attempt) {
-      attempt.syncPending = true;
-      saveSituationThreeProgress();
-    }
-    feedback.textContent = `${error.message} Tu respuesta y tu pantalla permanecen guardadas en este dispositivo.`;
-    if (button) {
-      button.disabled = false;
-      button.textContent = "Reintentar guardado";
-    }
-    return;
-  }
+  queueResponseSubmission({
+    situation: 3,
+    screen: 21 + stageIndex,
+    activityId: objectiveName || `s3_stage_${stageIndex}`,
+    answers: submittedAnswers,
+    validationResult: attempt ? attempt.correct : null,
+    fieldValidation,
+  });
 
   if (!objectiveName) {
-    if (remoteResult && !remoteResult.correct) {
-      feedback.textContent = remoteResult.hint || "No fue posible registrar este avance.";
-      if (button) {
-        button.disabled = false;
-        button.textContent = "Reintentar y guardar";
-      }
-      return;
-    }
     situationThreeProgress.stage = stageIndex + 1;
     saveSituationThreeProgress();
     render();
@@ -3003,20 +3174,41 @@ const submitSituationFourStage = (form, stageIndex) => {
   }
 
   const objectiveName = situationFourObjectiveForStage(stageIndex);
+  let attempt = null;
   if (objectiveName) {
     const attempts = situationFourAttemptList(objectiveName);
     if (attempts.length >= 2) return;
-    const attempt = {
+    attempt = {
       answers: { ...submittedAnswers },
       correct: situationFourObjectiveIsCorrect(stageIndex, submittedAnswers),
     };
     situationFourProgress.objectiveAttempts[objectiveName] = [...attempts, attempt];
     saveSituationFourProgress();
-    if (!attempt.correct) {
-      render();
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      return;
-    }
+  }
+
+  const fieldValidation = {};
+  if (stageIndex === 6) fieldValidation.s4_valor_x = attempt.correct;
+  if (stageIndex === 8) fieldValidation.s4_se_mantiene_igualdad = attempt.correct;
+  if (stageIndex === 9) {
+    [1, 2, 3, 4].forEach((index) => {
+      fieldValidation[`s4_registro_ingreso${index}`] = String(
+        submittedAnswers[`s4_registro_ingreso${index}`],
+      ).trim() === "120";
+    });
+  }
+  collectActiveSlice();
+  queueResponseSubmission({
+    situation: 4,
+    screen: 31 + stageIndex,
+    activityId: objectiveName || `s4_stage_${stageIndex}`,
+    answers: submittedAnswers,
+    validationResult: attempt ? attempt.correct : null,
+    fieldValidation,
+  });
+  if (attempt && !attempt.correct) {
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
   }
 
   situationFourProgress.stage = Math.min(10, stageIndex + 1);
@@ -3100,20 +3292,41 @@ const submitSituationFiveStage = (form, stageIndex) => {
   }
 
   const objectiveName = situationFiveObjectiveForStage(stageIndex);
+  let attempt = null;
   if (objectiveName) {
     const attempts = situationFiveAttemptList(objectiveName);
     if (attempts.length >= 2) return;
-    const attempt = {
+    attempt = {
       answers: { ...submittedAnswers },
       correct: situationFiveObjectiveIsCorrect(stageIndex, submittedAnswers),
     };
     situationFiveProgress.objectiveAttempts[objectiveName] = [...attempts, attempt];
     saveSituationFiveProgress();
-    if (!attempt.correct) {
-      render();
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      return;
-    }
+  }
+
+  const fieldValidation = {};
+  if (stageIndex === 4) fieldValidation.s5_signo_relacion = attempt.correct;
+  if (stageIndex === 6) fieldValidation.s5_valor_x = attempt.correct;
+  if (stageIndex === 7) {
+    fieldValidation.s5_resultado_receta1 = situationFiveValueIsSevenHundred(submittedAnswers.s5_resultado_receta1);
+    fieldValidation.s5_resultado_receta2 = situationFiveValueIsSevenHundred(submittedAnswers.s5_resultado_receta2);
+    fieldValidation.s5_misma_cantidad = submittedAnswers.s5_misma_cantidad === "Sí";
+    fieldValidation.s5_gramos_cada_receta = situationFiveValueIsSevenHundred(submittedAnswers.s5_gramos_cada_receta);
+  }
+  if (stageIndex === 8) fieldValidation.s5_porciones_final = attempt.correct;
+  collectActiveSlice();
+  queueResponseSubmission({
+    situation: 5,
+    screen: 42 + stageIndex,
+    activityId: objectiveName || `s5_stage_${stageIndex}`,
+    answers: submittedAnswers,
+    validationResult: attempt ? attempt.correct : null,
+    fieldValidation,
+  });
+  if (attempt && !attempt.correct) {
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
   }
 
   situationFiveProgress.stage = Math.min(11, stageIndex + 1);
@@ -3132,7 +3345,7 @@ document.addEventListener("submit", async (event) => {
     button.disabled = true;
     button.textContent = "Validando…";
     try {
-      await startSession(code, false);
+      await startSession(code);
       setIntroPhase(situationThreeReviewRequested || situationFourReviewRequested ? "game" : "presentation");
       render();
     } catch (error) {
@@ -3160,55 +3373,31 @@ document.addEventListener("submit", async (event) => {
       return;
     }
     const originalAnswers = Object.fromEntries(new FormData(form).entries());
-    if (stageIndex === 3) {
-      situationOneProgress.answers = { ...situationOneProgress.answers, ...originalAnswers };
-      situationOneProgress.stage = 4;
-      saveSituationOneProgress();
-      render();
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      return;
+    situationOneProgress.answers = { ...situationOneProgress.answers, ...originalAnswers };
+    let validationResult = null;
+    const fieldValidation = {};
+    if (stageIndex === 1) {
+      fieldValidation.s1_explora_a = originalAnswers.s1_explora_a.trim() === "120";
+      fieldValidation.s1_explora_b = originalAnswers.s1_explora_b.trim() === "4";
+      fieldValidation.s1_explora_c = originalAnswers.s1_explora_c.trim() === "30";
+      validationResult = Object.values(fieldValidation).every(Boolean);
+    } else if (stageIndex === 4) {
+      fieldValidation.s1_misma_cantidad = originalAnswers.s1_misma_cantidad === "Sí";
+      validationResult = fieldValidation.s1_misma_cantidad;
     }
-
-    const compatibilityAnswers = stageIndex === 1
-      ? { total: "120", activities: "4" }
-      : stageIndex === 2
-        ? { minutes: "30" }
-        : { leftMeaning: "activities", rightMeaning: "total", reason: "same" };
-    const answers = stageIndex === 4
-      ? { ...situationOneProgress.answers, ...originalAnswers, ...compatibilityAnswers }
-      : { ...originalAnswers, ...compatibilityAnswers };
-    const stepIndex = stageIndex === 1 ? 0 : stageIndex === 2 ? 1 : 2;
-    const fingerprint = JSON.stringify({ sessionId: researchSession.id, sceneIndex: 0, stepIndex, answers });
-    const savedPending = loadJson(PENDING_ATTEMPT_KEY, null);
-    const pending = savedPending?.fingerprint === fingerprint
-      ? savedPending
-      : { event_id: crypto.randomUUID(), fingerprint };
-    localStorage.setItem(PENDING_ATTEMPT_KEY, JSON.stringify(pending));
-
-    const button = form.querySelector("button[type='submit']");
-    const feedback = form.querySelector("#feedback");
-    button.disabled = true;
-    button.textContent = "Guardando…";
     collectActiveSlice();
-    flushActivity();
-    try {
-      const result = await apiRequest(`/api/sessions/${researchSession.id}/attempts`, {
-        method: "POST",
-        body: JSON.stringify({ event_id: pending.event_id, scene_index: 0, step_index: stepIndex, answers }),
-      });
-      localStorage.removeItem(PENDING_ATTEMPT_KEY);
-      applyServerState(result.state);
-      if (!result.correct) throw new Error(result.hint || "No fue posible guardar las respuestas.");
-      situationOneProgress.answers = { ...situationOneProgress.answers, ...originalAnswers };
-      situationOneProgress.stage = stageIndex + 1;
-      saveSituationOneProgress();
-      render();
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } catch (error) {
-      feedback.textContent = error.message;
-      button.disabled = false;
-      button.textContent = "Reintentar y guardar";
-    }
+    queueResponseSubmission({
+      situation: 1,
+      screen: 5 + stageIndex,
+      activityId: `s1_stage_${stageIndex}`,
+      answers: originalAnswers,
+      validationResult,
+      fieldValidation,
+    });
+    situationOneProgress.stage = stageIndex + 1;
+    saveSituationOneProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
   if (form.dataset.s2Stage) {
@@ -3230,51 +3419,18 @@ document.addEventListener("submit", async (event) => {
   const sceneIndex = state.currentScene;
   const stepIndex = state.currentStep;
   const step = scenes[sceneIndex].steps[stepIndex];
-  const answers = Object.fromEntries(new FormData(form).entries());
-  const fingerprint = JSON.stringify({ sessionId: researchSession.id, sceneIndex, stepIndex, answers });
-  const savedPending = loadJson(PENDING_ATTEMPT_KEY, null);
-  const pending = savedPending?.fingerprint === fingerprint
-    ? savedPending
-    : { event_id: crypto.randomUUID(), fingerprint };
-  localStorage.setItem(PENDING_ATTEMPT_KEY, JSON.stringify(pending));
-
   const button = form.querySelector("button[type='submit']");
   const feedback = form.querySelector("#feedback");
-  button.disabled = true;
-  button.textContent = "Guardando…";
-  collectActiveSlice();
-  flushActivity();
-  try {
-    const result = await apiRequest(`/api/sessions/${researchSession.id}/attempts`, {
-      method: "POST",
-      body: JSON.stringify({ event_id: pending.event_id, scene_index: sceneIndex, step_index: stepIndex, answers }),
-    });
-    localStorage.removeItem(PENDING_ATTEMPT_KEY);
-    applyServerState(result.state);
-    if (!result.correct) {
-      feedback.textContent = result.hint;
-      feedback.classList.remove("success");
-      button.disabled = false;
-      button.textContent = "Comprobar respuesta";
-      return;
-    }
-
-    if (stepIndex === scenes[sceneIndex].steps.length - 1) {
-      completeCurrentScene(sceneIndex);
-      return;
-    }
-    feedback.textContent = step.success;
-    feedback.classList.add("success");
-    document.querySelectorAll("#challenge-form input").forEach((element) => { element.disabled = true; });
-    button.hidden = true;
-    form.querySelector("[data-action='next-question']").hidden = false;
-    updateChrome();
-  } catch (error) {
-    feedback.textContent = error.message;
+  const result = step.validate(new FormData(form));
+  if (!result.ok) {
+    feedback.textContent = result.hint;
     feedback.classList.remove("success");
-    button.disabled = false;
-    button.textContent = "Reintentar y guardar";
+    return;
   }
+  feedback.textContent = step.success;
+  feedback.classList.add("success");
+  button.hidden = true;
+  form.querySelector("[data-action='next-question']").hidden = false;
 });
 
 document.addEventListener("click", (event) => {
@@ -3374,6 +3530,9 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (action === "start-s2") {
+    state.currentScene = 1;
+    state.completedScenes = [0];
+    state.unlocked = [0];
     situationOneProgress.stage = 7;
     saveSituationOneProgress();
     loadSituationTwoProgress();
@@ -3388,6 +3547,16 @@ document.addEventListener("click", async (event) => {
     window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
+  if (action === "start-s3") {
+    state.currentScene = 2;
+    state.completedScenes = [0, 1];
+    state.unlocked = [0, 1];
+    situationThreeProgress.stage = 0;
+    saveSituationThreeProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
   if (action === "s3-next") {
     situationThreeProgress.stage = Math.min(9, situationThreeProgress.stage + 1);
     saveSituationThreeProgress();
@@ -3396,12 +3565,18 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (action === "start-s4") {
+    state.currentScene = 3;
+    state.completedScenes = [0, 1, 2];
+    state.unlocked = [0, 1, 2];
     resetSituationFourProgress();
     render();
     window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
   if (action === "start-s5") {
+    state.currentScene = 4;
+    state.completedScenes = [0, 1, 2, 3];
+    state.unlocked = [0, 1, 2, 3];
     loadSituationFiveProgress();
     ensureSituationFiveProgress();
     setIntroPhase("game");
@@ -3496,7 +3671,7 @@ document.addEventListener("click", async (event) => {
     collectActiveSlice();
     await flushActivity();
     try {
-      await startSession(code, false);
+      await startSession(code, false, true);
       setIntroPhase("game");
       render();
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -3519,7 +3694,7 @@ document.addEventListener("click", async (event) => {
     collectActiveSlice();
     await flushActivity();
     try {
-      await startSession(code, false);
+      await startSession(code, false, true);
       render();
       showToast("Se inició una nueva sesión de repetición.");
     } catch (error) {
@@ -3558,6 +3733,31 @@ document.querySelectorAll("dialog").forEach((dialog) => {
 });
 
 const initialize = async () => {
+  if (isReviewMode) {
+    researchSession = {
+      id: `review-s${reviewSituation}`,
+      token: "",
+      code: `REVIEW${reviewSituation}`,
+      introPhase: "game",
+      experienceVersion: EXPERIENCE_VERSION,
+      progressRevision: 0,
+      completedAt: null,
+    };
+    introPhase = "game";
+    state = {
+      ...defaultState,
+      currentScene: reviewSituation - 1,
+      completedScenes: Array.from({ length: Math.max(0, reviewSituation - 1) }, (_, index) => index),
+      unlocked: Array.from({ length: Math.max(0, reviewSituation - 1) }, (_, index) => index),
+    };
+    loadSituationOneProgress();
+    loadSituationTwoProgress();
+    loadSituationThreeProgress();
+    loadSituationFourProgress();
+    loadSituationFiveProgress();
+    render();
+    return;
+  }
   if (!researchSession?.id || !researchSession?.token) {
     researchSession = null;
     introPhase = "home";
@@ -3565,30 +3765,47 @@ const initialize = async () => {
     return;
   }
   renderLoading();
+  const localRevision = Number(researchSession.progressRevision) || 0;
+  loadSituationOneProgress();
+  loadSituationTwoProgress();
+  loadSituationThreeProgress();
+  loadSituationFourProgress();
   loadSituationFiveProgress();
+  const pendingProgress = [...outbox].reverse().find(
+    (item) => item.type === "progress" && item.sessionId === researchSession.id,
+  );
+  const pendingRevision = Number(pendingProgress?.payload?.progress_revision) || 0;
+  if (pendingProgress && pendingRevision >= localRevision) {
+    researchSession.progressRevision = pendingRevision;
+    applyProgressSnapshot(pendingProgress.payload.progress_snapshot);
+  }
   try {
-    const data = await apiRequest(`/api/sessions/${researchSession.id}/state`);
+    const data = await apiRequest(`/api/v2/sessions/${researchSession.id}/state`);
     applyServerState(data.state);
-    loadSituationOneProgress();
-    loadSituationTwoProgress();
-    loadSituationThreeProgress();
-    loadSituationFourProgress();
-    loadSituationFiveProgress();
+    researchSession.experienceVersion = data.state.experience_version;
+    researchSession.completedAt = data.state.completed_at || null;
+    const serverRevision = Number(data.state.progress_revision) || 0;
+    if (serverRevision >= Math.max(localRevision, pendingRevision)) {
+      researchSession.progressRevision = serverRevision;
+      applyProgressSnapshot(data.state.progress_snapshot);
+    }
+    saveResearchSession();
     beginActivityTracking();
     render();
-    flushActivity();
-  } catch {
-    if (hasSituationFiveProgress) {
-      introPhase = "game";
-      beginActivityTracking();
-      render();
+    flushOutbox();
+  } catch (error) {
+    if (error.status === 401 || error.status === 404) {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+      researchSession = null;
+      state = { ...defaultState };
+      introPhase = "access";
+      renderAccess("Tu sesión anterior ya no está disponible. Ingresa nuevamente tu folio.");
       return;
     }
-    localStorage.removeItem(SESSION_STORAGE_KEY);
-    researchSession = null;
-    state = { ...defaultState };
-    introPhase = "access";
-    renderAccess("Tu sesión anterior ya no está disponible. Ingresa nuevamente tu folio.");
+    introPhase = researchSession.introPhase || "game";
+    state.currentScene = sceneForScreen(currentScreenForProgress());
+    beginActivityTracking();
+    render();
   }
 };
 

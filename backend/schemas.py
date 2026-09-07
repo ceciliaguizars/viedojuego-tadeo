@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -26,6 +27,39 @@ class AttemptRequest(BaseModel):
 class ActivityRequest(BaseModel):
     event_id: str = Field(min_length=8, max_length=64)
     active_seconds: float = Field(gt=0, le=120)
+
+
+class SessionStartV2Request(SessionStartRequest):
+    force_new: bool = False
+
+
+class ProgressV2Request(BaseModel):
+    current_screen: int = Field(ge=1, le=55)
+    progress_revision: int = Field(ge=1)
+    progress_snapshot: dict[str, Any]
+
+
+class ResponseValueV2Request(BaseModel):
+    field_id: str = Field(min_length=1, max_length=120)
+    field_type: str = Field(min_length=1, max_length=40)
+    literal_value: str
+    order_index: int = Field(ge=0)
+    validation_result: bool | None = None
+
+
+class ResponseSubmissionV2Request(BaseModel):
+    event_id: str = Field(min_length=8, max_length=64)
+    situation: int = Field(ge=1, le=5)
+    screen: int = Field(ge=1, le=55)
+    activity_id: str = Field(min_length=1, max_length=120)
+    validation_result: bool | None = None
+    client_created_at: datetime | None = None
+    order_index: int = Field(ge=0)
+    values: list[ResponseValueV2Request] = Field(min_length=1)
+
+
+class CompleteV2Request(BaseModel):
+    completion_event_id: str = Field(min_length=8, max_length=64)
 
 
 class ApplicationCreateRequest(BaseModel):

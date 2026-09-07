@@ -17,9 +17,26 @@ from sqlalchemy.orm import Session, selectinload
 from .config import PROJECT_ROOT, settings
 from .database import get_db
 from .metrics import application_summary, difficulty_by_scene, session_metrics
-from .models import ActivityEvent, Application, Attempt, GameSession, ParticipantCode, utc_now
+from .models import (
+    ActivityEvent,
+    Application,
+    Attempt,
+    GameSession,
+    ParticipantCode,
+    ResponseSubmission,
+    ResponseValue,
+    utc_now,
+)
 from .rag import RagError, RagService, rag_status
-from .schemas import ActivityRequest, AttemptRequest, SessionStartRequest
+from .schemas import (
+    ActivityRequest,
+    AttemptRequest,
+    CompleteV2Request,
+    ProgressV2Request,
+    ResponseSubmissionV2Request,
+    SessionStartRequest,
+    SessionStartV2Request,
+)
 from .security import (
     ADMIN_COOKIE,
     ADMIN_MAX_AGE_SECONDS,
@@ -35,12 +52,39 @@ from .services import (
     create_or_resume_session,
     existing_activity,
     existing_attempt,
+    existing_response,
     generate_unique_codes,
     load_session,
     mark_stale_sessions,
+    response_attempt_number_for,
     verify_session_access,
 )
 from .validators import STEP_COUNTS, validate_question
+
+
+FINAL_EXPERIENCE_VERSION = "tadeo-final-1"
+FINAL_FIELD_TYPES = {
+    "open_text",
+    "math_expression",
+    "objective_numeric",
+    "objective_choice",
+    "narrative_choice",
+}
+FINAL_SITUATION_SCREENS = {
+    1: range(5, 12),
+    2: range(12, 21),
+    3: range(21, 31),
+    4: range(31, 42),
+    5: range(42, 54),
+}
+
+
+def _iso_timestamp(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 app = FastAPI(title="El día de Tadeo", version="1.0.0")
@@ -83,6 +127,81 @@ def _state_payload(game_session: GameSession) -> dict[str, object]:
         "completed_scenes": list(range(game_session.completed_scenes)),
         "metrics": session_metrics(game_session),
     }
+
+
+def _response_payload(submission: ResponseSubmission) -> dict[str, object]:
+    return {
+        "event_id": submission.event_id,
+        "situation": submission.situation,
+        "screen": submission.screen,
+        "activity_id": submission.activity_id,
+        "attempt_number": submission.attempt_number,
+        "validation_result": submission.validation_result,
+        "client_created_at": _iso_timestamp(submission.client_created_at),
+        "submitted_at": _iso_timestamp(submission.submitted_at),
+        "order_index": submission.order_index,
+        "values": [
+            {
+                "field_id": value.field_id,
+                "field_type": value.field_type,
+                "literal_value": value.literal_value,
+                "order_index": value.order_index,
+                "validation_result": value.validation_result,
+            }
+            for value in submission.values
+        ],
+    }
+
+
+def _v2_state_payload(game_session: GameSession, include_responses: bool = True) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "session_id": game_session.id,
+        "participant_code": game_session.participant_code.code,
+        "application_name": game_session.participant_code.application.name,
+        "sequence": game_session.sequence,
+        "is_primary": game_session.is_primary,
+        "experience_version": game_session.experience_version,
+        "status": game_session.status,
+        "current_screen": game_session.current_screen,
+        "progress_revision": game_session.progress_revision,
+        "progress_snapshot": game_session.progress_snapshot or {},
+        "started_at": _iso_timestamp(game_session.started_at),
+        "completed_at": _iso_timestamp(game_session.completed_at),
+        "ended_reason": game_session.ended_reason,
+        "active_seconds": round(game_session.active_seconds, 2),
+    }
+    if include_responses:
+        payload["responses"] = [
+            _response_payload(item) for item in game_session.response_submissions
+        ]
+    return payload
+
+
+def _authorized_v2_session(
+    database: Session,
+    session_id: str,
+    authorization: str | None,
+) -> GameSession:
+    game_session = _authorized_game_session(database, session_id, authorization)
+    if game_session.experience_version != FINAL_EXPERIENCE_VERSION:
+        raise HTTPException(status_code=409, detail="La sesión no pertenece a la experiencia definitiva")
+    return game_session
+
+
+def _authorized_v2_session_for_update(
+    database: Session,
+    session_id: str,
+    authorization: str | None,
+) -> GameSession:
+    token = _bearer_token(authorization)
+    game_session = database.scalar(
+        select(GameSession).where(GameSession.id == session_id).with_for_update()
+    )
+    if not game_session or not verify_session_access(game_session, token):
+        raise HTTPException(status_code=401, detail="Sesión no autorizada")
+    if game_session.experience_version != FINAL_EXPERIENCE_VERSION:
+        raise HTTPException(status_code=409, detail="La sesión no pertenece a la experiencia definitiva")
+    return game_session
 
 
 def _admin_context(request: Request, **values: object) -> dict[str, object]:
@@ -241,6 +360,218 @@ def record_activity(
     return {"active_seconds": round(refreshed.active_seconds, 2)}
 
 
+@app.post("/api/v2/sessions")
+def start_v2_session(
+    payload: SessionStartV2Request,
+    database: Session = Depends(get_db),
+) -> dict[str, object]:
+    mark_stale_sessions(database)
+    participant_code = database.scalar(
+        select(ParticipantCode)
+        .options(selectinload(ParticipantCode.application))
+        .where(ParticipantCode.code == payload.code)
+    )
+    if not participant_code or not participant_code.is_active or not participant_code.application.is_active:
+        raise HTTPException(status_code=404, detail="El folio no es válido o ya no está activo")
+
+    game_session, token, resumed = create_or_resume_session(
+        database,
+        participant_code,
+        payload.resume_session_id,
+        payload.resume_token,
+        experience_version=FINAL_EXPERIENCE_VERSION,
+        force_new=payload.force_new,
+    )
+    refreshed = load_session(database, game_session.id) or game_session
+    return {
+        "session_token": token,
+        "resumed": resumed,
+        "state": _v2_state_payload(refreshed),
+    }
+
+
+@app.get("/api/v2/sessions/{session_id}/state")
+def get_v2_session_state(
+    session_id: str,
+    authorization: Annotated[str | None, Header()] = None,
+    database: Session = Depends(get_db),
+) -> dict[str, object]:
+    game_session = _authorized_v2_session(database, session_id, authorization)
+    return {"state": _v2_state_payload(game_session)}
+
+
+@app.put("/api/v2/sessions/{session_id}/progress")
+def update_v2_progress(
+    session_id: str,
+    payload: ProgressV2Request,
+    authorization: Annotated[str | None, Header()] = None,
+    database: Session = Depends(get_db),
+) -> dict[str, object]:
+    game_session = _authorized_v2_session_for_update(database, session_id, authorization)
+    if game_session.completed_at is not None:
+        return {"applied": False, "completed": True, "state": _v2_state_payload(game_session, False)}
+    if payload.progress_revision <= game_session.progress_revision:
+        return {"applied": False, "stale": True, "state": _v2_state_payload(game_session, False)}
+
+    game_session.current_screen = payload.current_screen
+    game_session.progress_revision = payload.progress_revision
+    game_session.progress_snapshot = payload.progress_snapshot
+    game_session.last_activity_at = utc_now()
+    if game_session.status == "abandoned":
+        game_session.status = "in_progress"
+    database.commit()
+    refreshed = load_session(database, session_id) or game_session
+    return {"applied": True, "state": _v2_state_payload(refreshed, False)}
+
+
+@app.post("/api/v2/sessions/{session_id}/responses")
+def submit_v2_response(
+    session_id: str,
+    payload: ResponseSubmissionV2Request,
+    authorization: Annotated[str | None, Header()] = None,
+    database: Session = Depends(get_db),
+) -> dict[str, object]:
+    game_session = _authorized_v2_session_for_update(database, session_id, authorization)
+    duplicate = existing_response(database, session_id, payload.event_id)
+    if duplicate:
+        return {"duplicate": True, "submission": _response_payload(duplicate)}
+    if game_session.completed_at is not None:
+        raise HTTPException(status_code=409, detail="La sesión ya fue finalizada")
+    if payload.screen not in FINAL_SITUATION_SCREENS[payload.situation]:
+        raise HTTPException(status_code=422, detail="La pantalla no corresponde a la situación")
+
+    field_ids = [value.field_id for value in payload.values]
+    if len(field_ids) != len(set(field_ids)):
+        raise HTTPException(status_code=422, detail="Cada field_id debe aparecer una sola vez por envío")
+    value_order = [value.order_index for value in payload.values]
+    if len(value_order) != len(set(value_order)):
+        raise HTTPException(status_code=422, detail="Cada valor debe tener un order_index distinto")
+    for value in payload.values:
+        if not value.field_id.startswith(f"s{payload.situation}_"):
+            raise HTTPException(
+                status_code=422,
+                detail=f"{value.field_id} no corresponde a la situación {payload.situation}",
+            )
+        if value.field_type not in FINAL_FIELD_TYPES:
+            raise HTTPException(status_code=422, detail=f"Tipo de campo no reconocido: {value.field_type}")
+        is_objective = value.field_type in {"objective_numeric", "objective_choice"}
+        if is_objective and value.validation_result is None:
+            raise HTTPException(status_code=422, detail=f"{value.field_id} requiere validation_result")
+        if not is_objective and value.validation_result is not None:
+            raise HTTPException(status_code=422, detail=f"{value.field_id} debe usar validation_result null")
+
+    has_objective = any(
+        value.field_type in {"objective_numeric", "objective_choice"}
+        for value in payload.values
+    )
+    if has_objective != (payload.validation_result is not None):
+        raise HTTPException(
+            status_code=422,
+            detail="validation_result debe existir únicamente en envíos con respuestas objetivas",
+        )
+
+    attempt_number = (
+        response_attempt_number_for(database, session_id, payload.activity_id)
+        if payload.validation_result is not None
+        else None
+    )
+    submission = ResponseSubmission(
+        game_session_id=session_id,
+        event_id=payload.event_id,
+        situation=payload.situation,
+        screen=payload.screen,
+        activity_id=payload.activity_id,
+        attempt_number=attempt_number,
+        validation_result=payload.validation_result,
+        client_created_at=payload.client_created_at,
+        order_index=payload.order_index,
+    )
+    submission.values = [
+        ResponseValue(
+            field_id=value.field_id,
+            field_type=value.field_type,
+            literal_value=value.literal_value,
+            order_index=value.order_index,
+            validation_result=value.validation_result,
+        )
+        for value in payload.values
+    ]
+    database.add(submission)
+    game_session.last_activity_at = utc_now()
+    if game_session.status == "abandoned":
+        game_session.status = "in_progress"
+    try:
+        database.commit()
+    except IntegrityError:
+        database.rollback()
+        duplicate = existing_response(database, session_id, payload.event_id)
+        if not duplicate:
+            raise
+        return {"duplicate": True, "submission": _response_payload(duplicate)}
+
+    stored = existing_response(database, session_id, payload.event_id) or submission
+    return {"duplicate": False, "submission": _response_payload(stored)}
+
+
+@app.post("/api/v2/sessions/{session_id}/activity")
+def record_v2_activity(
+    session_id: str,
+    payload: ActivityRequest,
+    authorization: Annotated[str | None, Header()] = None,
+    database: Session = Depends(get_db),
+) -> dict[str, object]:
+    game_session = _authorized_v2_session_for_update(database, session_id, authorization)
+    duplicate = existing_activity(database, session_id, payload.event_id)
+    if game_session.completed_at is not None:
+        return {
+            "active_seconds": round(game_session.active_seconds, 2),
+            "duplicate": bool(duplicate),
+            "ignored": True,
+        }
+    if not duplicate:
+        database.add(
+            ActivityEvent(
+                game_session_id=session_id,
+                event_id=payload.event_id,
+                active_seconds=round(payload.active_seconds, 3),
+            )
+        )
+        game_session.active_seconds = round(game_session.active_seconds + payload.active_seconds, 3)
+        game_session.last_activity_at = utc_now()
+        try:
+            database.commit()
+        except IntegrityError:
+            database.rollback()
+    refreshed = load_session(database, session_id) or game_session
+    return {
+        "active_seconds": round(refreshed.active_seconds, 2),
+        "duplicate": bool(duplicate),
+        "ignored": False,
+    }
+
+
+@app.post("/api/v2/sessions/{session_id}/complete")
+def complete_v2_session(
+    session_id: str,
+    payload: CompleteV2Request,
+    authorization: Annotated[str | None, Header()] = None,
+    database: Session = Depends(get_db),
+) -> dict[str, object]:
+    game_session = _authorized_v2_session_for_update(database, session_id, authorization)
+    if game_session.completed_at is not None:
+        return {"duplicate": True, "state": _v2_state_payload(game_session, False)}
+
+    completed_at = utc_now()
+    game_session.completion_event_id = payload.completion_event_id
+    game_session.completed_at = completed_at
+    game_session.last_activity_at = completed_at
+    game_session.status = "completed"
+    game_session.ended_reason = "completed"
+    database.commit()
+    refreshed = load_session(database, session_id) or game_session
+    return {"duplicate": False, "state": _v2_state_payload(refreshed, False)}
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_home(request: Request, database: Session = Depends(get_db)) -> Response:
     if not admin_is_authenticated(request):
@@ -259,7 +590,10 @@ def admin_home(request: Request, database: Session = Depends(get_db)) -> Respons
             select(GameSession)
             .join(ParticipantCode)
             .options(selectinload(GameSession.attempts))
-            .where(ParticipantCode.application_id == application.id)
+            .where(
+                ParticipantCode.application_id == application.id,
+                GameSession.experience_version == "legacy-1",
+            )
         ).all()
         rows.append({"application": application, "summary": application_summary(sessions)})
     dashboard_summary = {
@@ -384,7 +718,10 @@ def _load_application_detail(database: Session, application_id: int) -> tuple[Ap
             select(GameSession)
             .join(ParticipantCode)
             .options(selectinload(GameSession.attempts), selectinload(GameSession.participant_code))
-            .where(ParticipantCode.application_id == application_id)
+            .where(
+                ParticipantCode.application_id == application_id,
+                GameSession.experience_version == "legacy-1",
+            )
             .order_by(GameSession.started_at.desc())
         ).all()
     )

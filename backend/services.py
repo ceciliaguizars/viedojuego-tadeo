@@ -9,7 +9,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from .config import settings
-from .models import ActivityEvent, Attempt, GameSession, ParticipantCode, utc_now
+from .models import ActivityEvent, Attempt, GameSession, ParticipantCode, ResponseSubmission, utc_now
 from .security import hash_token, new_access_token
 
 
@@ -49,6 +49,7 @@ def load_session(database: Session, session_id: str) -> GameSession | None:
         select(GameSession)
         .options(
             selectinload(GameSession.attempts),
+            selectinload(GameSession.response_submissions).selectinload(ResponseSubmission.values),
             selectinload(GameSession.participant_code).selectinload(ParticipantCode.application),
         )
         .where(GameSession.id == session_id)
@@ -60,12 +61,15 @@ def create_or_resume_session(
     participant_code: ParticipantCode,
     resume_session_id: str | None,
     resume_token: str | None,
+    experience_version: str = "legacy-1",
+    force_new: bool = False,
 ) -> tuple[GameSession, str, bool]:
-    if resume_session_id and resume_token:
+    if not force_new and resume_session_id and resume_token:
         existing = load_session(database, resume_session_id)
         if (
             existing
             and existing.participant_code_id == participant_code.id
+            and existing.experience_version == experience_version
             and verify_session_access(existing, resume_token)
         ):
             existing.last_activity_at = utc_now()
@@ -73,6 +77,26 @@ def create_or_resume_session(
                 existing.status = "in_progress"
             database.commit()
             return existing, resume_token, True
+
+    if not force_new and experience_version != "legacy-1":
+        recoverable = database.scalar(
+            select(GameSession)
+            .where(
+                GameSession.participant_code_id == participant_code.id,
+                GameSession.experience_version == experience_version,
+                GameSession.completed_at.is_(None),
+            )
+            .order_by(GameSession.started_at.desc())
+            .limit(1)
+        )
+        if recoverable:
+            token = new_access_token()
+            recoverable.access_token_hash = hash_token(token)
+            recoverable.last_activity_at = utc_now()
+            if recoverable.status == "abandoned":
+                recoverable.status = "in_progress"
+            database.commit()
+            return load_session(database, recoverable.id) or recoverable, token, True
 
     previous_count = database.scalar(
         select(func.count(GameSession.id)).where(GameSession.participant_code_id == participant_code.id)
@@ -84,6 +108,8 @@ def create_or_resume_session(
         sequence=previous_count + 1,
         is_primary=previous_count == 0,
         access_token_hash=hash_token(token),
+        experience_version=experience_version,
+        current_screen=2 if experience_version != "legacy-1" else 1,
     )
     if participant_code.first_used_at is None:
         participant_code.first_used_at = utc_now()
@@ -120,3 +146,29 @@ def existing_activity(database: Session, session_id: str, event_id: str) -> Acti
             ActivityEvent.event_id == event_id,
         )
     )
+
+
+def existing_response(database: Session, session_id: str, event_id: str) -> ResponseSubmission | None:
+    return database.scalar(
+        select(ResponseSubmission)
+        .where(
+            ResponseSubmission.game_session_id == session_id,
+            ResponseSubmission.event_id == event_id,
+        )
+        .options(selectinload(ResponseSubmission.values))
+    )
+
+
+def response_attempt_number_for(
+    database: Session,
+    session_id: str,
+    activity_id: str,
+) -> int:
+    count = database.scalar(
+        select(func.count(ResponseSubmission.id)).where(
+            ResponseSubmission.game_session_id == session_id,
+            ResponseSubmission.activity_id == activity_id,
+            ResponseSubmission.validation_result.is_not(None),
+        )
+    ) or 0
+    return count + 1
