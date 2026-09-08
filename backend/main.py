@@ -30,6 +30,7 @@ from .models import (
 from .rag import RagError, RagService, rag_status
 from .schemas import (
     ActivityRequest,
+    ActivityV2Request,
     AttemptRequest,
     CompleteV2Request,
     ProgressV2Request,
@@ -516,7 +517,7 @@ def submit_v2_response(
 @app.post("/api/v2/sessions/{session_id}/activity")
 def record_v2_activity(
     session_id: str,
-    payload: ActivityRequest,
+    payload: ActivityV2Request,
     authorization: Annotated[str | None, Header()] = None,
     database: Session = Depends(get_db),
 ) -> dict[str, object]:

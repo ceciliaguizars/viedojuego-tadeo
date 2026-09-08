@@ -64,6 +64,15 @@ def test_v2_session_can_be_recovered_with_the_same_folio(client, participant_cod
     assert recovered["session_token"] != first["session_token"]
 
 
+def test_v2_force_new_creates_a_separate_retake(client, participant_code):
+    first = start_v2(client, participant_code)
+    retake = start_v2(client, participant_code, force_new=True)
+
+    assert retake["resumed"] is False
+    assert retake["state"]["session_id"] != first["state"]["session_id"]
+    assert retake["state"]["sequence"] == 2
+
+
 def test_v2_progress_snapshot_is_revision_controlled_and_recoverable(client, participant_code):
     session = start_v2(client, participant_code)
     session_id = session["state"]["session_id"]
@@ -130,6 +139,7 @@ def test_v2_open_and_math_responses_preserve_literals_order_and_null_validation(
     ]
     assert submission["values"][1]["literal_value"] == values[1]["literal_value"]
     assert all(item["validation_result"] is None for item in submission["values"])
+    assert submission["client_created_at"] == "2026-09-07T18:00:00Z"
     assert datetime.fromisoformat(submission["submitted_at"])
 
 

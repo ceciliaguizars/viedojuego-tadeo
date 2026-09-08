@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -27,6 +28,10 @@ class AttemptRequest(BaseModel):
 class ActivityRequest(BaseModel):
     event_id: str = Field(min_length=8, max_length=64)
     active_seconds: float = Field(gt=0, le=120)
+
+
+def normalize_uuid(value: str) -> str:
+    return str(UUID(value))
 
 
 class SessionStartV2Request(SessionStartRequest):
@@ -57,9 +62,26 @@ class ResponseSubmissionV2Request(BaseModel):
     order_index: int = Field(ge=0)
     values: list[ResponseValueV2Request] = Field(min_length=1)
 
+    @field_validator("event_id")
+    @classmethod
+    def validate_event_id(cls, value: str) -> str:
+        return normalize_uuid(value)
+
+
+class ActivityV2Request(ActivityRequest):
+    @field_validator("event_id")
+    @classmethod
+    def validate_event_id(cls, value: str) -> str:
+        return normalize_uuid(value)
+
 
 class CompleteV2Request(BaseModel):
     completion_event_id: str = Field(min_length=8, max_length=64)
+
+    @field_validator("completion_event_id")
+    @classmethod
+    def validate_completion_event_id(cls, value: str) -> str:
+        return normalize_uuid(value)
 
 
 class ApplicationCreateRequest(BaseModel):
