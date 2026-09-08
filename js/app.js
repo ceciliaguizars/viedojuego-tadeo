@@ -682,8 +682,21 @@ let situationFourProgress = { stage: 0, answers: {}, objectiveAttempts: {}, sele
 let hasSituationFourProgress = false;
 let situationFiveProgress = { stage: 0, answers: {}, objectiveAttempts: {}, selectedRecipe: "" };
 let hasSituationFiveProgress = false;
+const defaultFinalFlow = {
+  screen: 53,
+  completionEventId: null,
+  completionStatus: "idle",
+  completionError: "",
+};
+let finalFlow = {
+  ...defaultFinalFlow,
+  ...(researchSession?.finalFlow && typeof researchSession.finalFlow === "object"
+    ? researchSession.finalFlow
+    : {}),
+};
 let activeStartedAt = null;
 let outboxSending = false;
+let outboxFlushPromise = null;
 let toastTimer;
 
 function loadJson(key, fallback) {
@@ -700,6 +713,12 @@ const saveResearchSession = () => {
   localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(researchSession));
 };
 const saveOutbox = () => localStorage.setItem(OUTBOX_STORAGE_KEY, JSON.stringify(outbox));
+
+const saveFinalFlow = () => {
+  if (!researchSession || isReviewMode) return;
+  researchSession.finalFlow = { ...finalFlow };
+  saveResearchSession();
+};
 
 const loadSituationOneProgress = () => {
   const allProgress = loadJson(SITUATION_ONE_PROGRESS_KEY, {});
@@ -885,6 +904,14 @@ const sceneForScreen = (screen) => {
 const applyServerState = (serverState) => {
   if (serverState.experience_version === EXPERIENCE_VERSION) {
     const currentScreen = Number(serverState.current_screen) || 1;
+    if (!isReviewMode && currentScreen >= 54) {
+      finalFlow.screen = Math.min(55, currentScreen);
+    }
+    if (!isReviewMode && serverState.completed_at) {
+      finalFlow.screen = 55;
+      finalFlow.completionStatus = "completed";
+      finalFlow.completionError = "";
+    }
     const currentScene = sceneForScreen(currentScreen);
     state = {
       currentScene,
@@ -928,6 +955,7 @@ const currentScreenForProgress = () => {
   if (introPhase === "access") return 2;
   if (introPhase === "presentation") return 3;
   if (introPhase === "agenda") return 4;
+  if (!isReviewMode && finalFlow.screen >= 54) return Math.min(55, finalFlow.screen);
   if (situationFiveReviewRequested || hasSituationFiveProgress) return 42 + situationFiveProgress.stage;
   if (situationFourReviewRequested || hasSituationFourProgress) return 31 + situationFourProgress.stage;
   if (situationThreeReviewRequested || hasSituationThreeProgress) return 21 + situationThreeProgress.stage;
@@ -946,6 +974,12 @@ const progressSnapshot = () => ({
   situation_three: situationThreeProgress,
   situation_four: situationFourProgress,
   situation_five: situationFiveProgress,
+  final_flow: {
+    current_screen: finalFlow.screen,
+    completion_event_id: finalFlow.completionEventId,
+    completion_status: finalFlow.completionStatus,
+    completion_error: finalFlow.completionError,
+  },
 });
 
 const persistProgressCaches = () => {
@@ -975,6 +1009,15 @@ const applyProgressSnapshot = (snapshot) => {
   situationThreeProgress = restored("situation_three", situationThreeProgress);
   situationFourProgress = restored("situation_four", situationFourProgress);
   situationFiveProgress = restored("situation_five", situationFiveProgress);
+  const restoredFinalFlow = restored("final_flow", null);
+  if (!isReviewMode && restoredFinalFlow) {
+    finalFlow = {
+      screen: Math.min(55, Math.max(53, Number(restoredFinalFlow.current_screen) || 53)),
+      completionEventId: restoredFinalFlow.completion_event_id || null,
+      completionStatus: String(restoredFinalFlow.completion_status || "idle"),
+      completionError: String(restoredFinalFlow.completion_error || ""),
+    };
+  }
   hasSituationOneProgress = snapshot.has_situation_one_progress === true
     || Number(situationOneProgress.stage) > 0
     || Object.keys(situationOneProgress.answers || {}).length > 0;
@@ -992,6 +1035,7 @@ const applyProgressSnapshot = (snapshot) => {
   state.completedScenes = Array.from({ length: Math.min(recoveredScene, 5) }, (_, index) => index);
   state.unlocked = [...state.completedScenes];
   researchSession.introPhase = introPhase;
+  researchSession.finalFlow = { ...finalFlow };
   saveResearchSession();
   persistProgressCaches();
 };
@@ -1107,37 +1151,64 @@ const queueResponseSubmission = ({
   );
 };
 
-const queueSessionCompletion = (completionEventId) => enqueueOutbox(
-  "complete",
-  `/api/v2/sessions/${researchSession.id}/complete`,
-  "POST",
-  { completion_event_id: completionEventId },
+const pendingCompletionItem = () => outbox.find(
+  (item) => item.type === "complete" && item.sessionId === researchSession?.id,
 );
 
+const ensureCompletionEventId = () => {
+  const queuedCompletionId = pendingCompletionItem()?.payload?.completion_event_id;
+  if (queuedCompletionId) finalFlow.completionEventId = queuedCompletionId;
+  if (!finalFlow.completionEventId) finalFlow.completionEventId = crypto.randomUUID();
+  saveFinalFlow();
+  return finalFlow.completionEventId;
+};
+
+const queueSessionCompletion = (completionEventId) => {
+  const existing = pendingCompletionItem();
+  if (existing) return existing;
+  return enqueueOutbox(
+    "complete",
+    `/api/v2/sessions/${researchSession.id}/complete`,
+    "POST",
+    { completion_event_id: completionEventId },
+  );
+};
+
 const flushOutbox = async () => {
-  if (outboxSending || !outbox.length || isReviewMode) return;
+  if (isReviewMode || !outbox.length) return { ok: true, error: null };
+  if (outboxFlushPromise) return outboxFlushPromise;
   outboxSending = true;
-  try {
-    while (outbox.length) {
-      const item = outbox[0];
-      const result = await apiRequest(item.path, {
-        method: item.method,
-        body: JSON.stringify(item.payload),
-        keepalive: item.type === "activity",
-      }, item.token);
-      if (item.type === "complete" && result.state?.completed_at) {
-        researchSession.completedAt = result.state.completed_at;
-        activeStartedAt = null;
-        saveResearchSession();
+  outboxFlushPromise = (async () => {
+    try {
+      while (outbox.length) {
+        const item = outbox[0];
+        const result = await apiRequest(item.path, {
+          method: item.method,
+          body: JSON.stringify(item.payload),
+          keepalive: item.type === "activity",
+        }, item.token);
+        if (item.type === "complete" && result.state?.completed_at) {
+          researchSession.completedAt = result.state.completed_at;
+          finalFlow.screen = 55;
+          finalFlow.completionEventId = item.payload.completion_event_id;
+          finalFlow.completionStatus = "completed";
+          finalFlow.completionError = "";
+          activeStartedAt = null;
+          saveFinalFlow();
+        }
+        outbox = outbox.filter((queued) => queued.queueId !== item.queueId);
+        saveOutbox();
       }
-      outbox = outbox.filter((queued) => queued.queueId !== item.queueId);
-      saveOutbox();
+      return { ok: true, error: null };
+    } catch (error) {
+      // La outbox se conserva completa y reintenta con el mismo event_id o revisión.
+      return { ok: false, error };
+    } finally {
+      outboxSending = false;
+      outboxFlushPromise = null;
     }
-  } catch {
-    // La outbox se conserva completa y reintenta con el mismo event_id o revisión.
-  } finally {
-    outboxSending = false;
-  }
+  })();
+  return outboxFlushPromise;
 };
 
 const agendaCompleted = () => state.completedScenes.filter((sceneIndex) => sceneIndex > 0).length;
@@ -2377,6 +2448,33 @@ const situationFivePanel = (stageIndex, content, panelClass = "") => `
     </div>
   </section>`;
 
+const finalFlowHud = (screen) => {
+  const dots = Array.from(
+    { length: 14 },
+    (_, index) => `<span class="s1-hud-dot ${index < screen - 42 ? "done" : ""} ${index === screen - 42 ? "current" : ""}" aria-hidden="true"></span>`,
+  ).join("");
+  return `
+    <div class="s1-hud s5-hud" aria-label="Cierre, pantalla ${screen} de 55">
+      <span class="s1-hud-title">Cierre</span>
+      <span class="s1-hud-dots">${dots}</span>
+    </div>`;
+};
+
+const finalFlowPanel = (screen, content, panelClass = "") => `
+  <section class="screen situation-five-screen s1-game-stage s5-game-stage" data-final-screen="${screen}" style="background-image: url('./assets/scenes/cocina.png')">
+    ${finalFlowHud(screen)}
+    ${situationFiveObjects(11)}
+    <div class="s1-interface-panel s5-interface-panel ${panelClass}">
+      <div class="s3-panel-utility">
+        <div class="s1-panel-heading">
+          <span class="s1-panel-kicker">Pantalla ${screen} · Cierre del recorrido</span>
+          <span class="s1-panel-scene">La cocina</span>
+        </div>
+      </div>
+      ${content}
+    </div>
+  </section>`;
+
 const situationFiveSavedAnswer = (name) => escapeHtml(situationFiveProgress.answers[name] || "");
 
 const situationFiveAttemptList = (name) => {
@@ -2700,7 +2798,49 @@ const renderSituationFiveAgenda = () => {
       <p><strong>Pendiente futuro</strong>Comprar alimento para el perro el día ${reminderDay}.</p>
     </aside>
     <p class="s5-agenda-complete"><strong>Actividades principales:</strong> 4 de 4 completadas.</p>
+    ${isReviewMode ? "" : '<button class="primary-button" type="button" data-action="open-final-narrative">CONTINUAR <span aria-hidden="true">→</span></button>'}
   `, "s1-agenda-panel s2-agenda-panel s5-agenda-panel");
+};
+
+const renderFinalNarrative = () => {
+  progressBar.style.width = "98%";
+  app.innerHTML = finalFlowPanel(54, `
+    <h1>El día de Tadeo</h1>
+    <p class="challenge-intro">Después de completar todas sus actividades, Tadeo revisa su agenda y se da cuenta de que logró terminar todo lo que tenía pendiente.</p>
+    <p class="challenge-intro">Durante el día tuvo que analizar diferentes situaciones, representar cantidades desconocidas y encontrar formas de resolverlas.</p>
+    <button class="primary-button" type="button" data-action="open-final-screen">CONTINUAR <span aria-hidden="true">→</span></button>
+  `, "s5-narrative-panel");
+};
+
+const finalScreenControls = () => {
+  if (researchSession?.completedAt || finalFlow.completionStatus === "completed") {
+    return `
+      <p class="feedback success" role="status">Finalización confirmada.</p>
+      <button class="primary-button" type="button" disabled>FINALIZADO</button>`;
+  }
+  if (finalFlow.completionStatus === "syncing" || finalFlow.completionStatus === "completing") {
+    return `
+      <p class="feedback" role="status">Sincronizando respuestas…</p>
+      <button class="primary-button" type="button" disabled>${finalFlow.completionStatus === "completing" ? "FINALIZANDO…" : "FINALIZAR"}</button>`;
+  }
+  if (finalFlow.completionStatus === "error") {
+    const completionPending = finalFlow.completionError === "complete" || Boolean(pendingCompletionItem());
+    return `
+      <p class="feedback" role="alert">${completionPending
+        ? "No fue posible confirmar el registro todavía. Intenta nuevamente."
+        : "No fue posible sincronizar todas las respuestas todavía. Intenta nuevamente."}</p>
+      <button class="primary-button" type="button" data-action="${completionPending ? "finalize-session" : "retry-final-sync"}">${completionPending ? "REINTENTAR FINALIZACIÓN" : "REINTENTAR SINCRONIZACIÓN"}</button>`;
+  }
+  return '<button class="primary-button" type="button" data-action="finalize-session">FINALIZAR</button>';
+};
+
+const renderFinalScreen = () => {
+  progressBar.style.width = "100%";
+  app.innerHTML = finalFlowPanel(55, `
+    <h1>¡Terminaste el recorrido de Tadeo!</h1>
+    <p class="challenge-intro">Tus respuestas han sido registradas.</p>
+    ${finalScreenControls()}
+  `, "s5-narrative-panel");
 };
 
 const renderSituationFive = () => {
@@ -2813,6 +2953,8 @@ const render = () => {
     situationOneProgress.stage = Math.min(situationOneProgress.stage, 6);
     renderSituationOne();
   }
+  else if (!isReviewMode && finalFlow.screen === 54) renderFinalNarrative();
+  else if (!isReviewMode && finalFlow.screen >= 55) renderFinalScreen();
   else if (situationThreeProgress.stage === 9 && !hasSituationFourProgress) renderSituationThree();
   else if (hasSituationFiveProgress) renderSituationFive();
   else if (hasSituationFourProgress) renderSituationFour();
@@ -2824,7 +2966,7 @@ const render = () => {
     ensureSituationFiveProgress();
     renderSituationFive();
   }
-  else if (state.currentScene >= scenes.length) renderFinish();
+  else if (state.currentScene >= scenes.length && researchSession.experienceVersion !== EXPERIENCE_VERSION) renderFinish();
   else renderScene();
   app.focus({ preventScroll: true });
 };
@@ -2848,7 +2990,98 @@ const flushActivity = async () => {
 };
 
 const beginActivityTracking = () => {
-  activeStartedAt = !isReviewMode && document.visibilityState === "visible" ? performance.now() : null;
+  activeStartedAt = !isReviewMode && !researchSession?.completedAt && document.visibilityState === "visible"
+    ? performance.now()
+    : null;
+};
+
+const setFinalFlowStatus = (status, error = "") => {
+  finalFlow.completionStatus = status;
+  finalFlow.completionError = error;
+  saveFinalFlow();
+};
+
+const synchronizeFinalScreen = async () => {
+  if (isReviewMode || finalFlow.screen !== 55 || researchSession?.completedAt) return;
+  setFinalFlowStatus("syncing");
+  render();
+  collectActiveSlice();
+  const result = await flushOutbox();
+  if (researchSession?.completedAt) {
+    setFinalFlowStatus("completed");
+  } else if (result.ok) {
+    setFinalFlowStatus("ready");
+  } else {
+    setFinalFlowStatus("error", "sync");
+  }
+  render();
+};
+
+const restoreFinalScreenState = async () => {
+  if (isReviewMode || finalFlow.screen !== 55) return;
+  if (researchSession?.completedAt) {
+    outbox = outbox.filter(
+      (item) => !(item.type === "complete" && item.sessionId === researchSession.id),
+    );
+    saveOutbox();
+    setFinalFlowStatus("completed");
+    activeStartedAt = null;
+    render();
+    return;
+  }
+  if (pendingCompletionItem()) {
+    ensureCompletionEventId();
+    setFinalFlowStatus("error", "complete");
+    render();
+    return;
+  }
+  await synchronizeFinalScreen();
+};
+
+const finalizeSession = async () => {
+  if (
+    isReviewMode
+    || finalFlow.screen !== 55
+    || researchSession?.completedAt
+    || ["syncing", "completing", "completed"].includes(finalFlow.completionStatus)
+  ) return;
+
+  const completionEventId = ensureCompletionEventId();
+  setFinalFlowStatus("completing");
+  render();
+
+  const queuedCompletion = pendingCompletionItem();
+  if (queuedCompletion) {
+    outbox = outbox.filter((item) => item.queueId !== queuedCompletion.queueId);
+    saveOutbox();
+  }
+  collectActiveSlice();
+  const syncResult = await flushOutbox();
+  if (!syncResult.ok) {
+    if (queuedCompletion) {
+      outbox.push(queuedCompletion);
+      saveOutbox();
+    }
+    setFinalFlowStatus("error", "complete");
+    render();
+    return;
+  }
+
+  if (queuedCompletion) {
+    outbox.push({ ...queuedCompletion, token: researchSession.token });
+    saveOutbox();
+    flushOutbox();
+  } else {
+    queueSessionCompletion(completionEventId);
+  }
+  const completionResult = await flushOutbox();
+  if (!completionResult.ok || !researchSession?.completedAt) {
+    setFinalFlowStatus("error", "complete");
+  } else {
+    setFinalFlowStatus("completed");
+    activeStartedAt = null;
+  }
+  render();
 };
 
 const startSession = async (code, allowResume = true, forceNew = false) => {
@@ -2869,6 +3102,9 @@ const startSession = async (code, allowResume = true, forceNew = false) => {
     (item) => item.type === "progress" && item.sessionId === data.state.session_id,
   );
   const pendingRevision = Number(pendingProgress?.payload?.progress_revision) || 0;
+  finalFlow = previous?.id === data.state.session_id
+    ? { ...defaultFinalFlow, ...(previous.finalFlow || {}) }
+    : { ...defaultFinalFlow };
   researchSession = {
     id: data.state.session_id,
     token: data.session_token,
@@ -2877,6 +3113,7 @@ const startSession = async (code, allowResume = true, forceNew = false) => {
     experienceVersion: data.state.experience_version,
     progressRevision: Math.max(previousRevision, pendingRevision, Number(data.state.progress_revision) || 0),
     completedAt: data.state.completed_at || null,
+    finalFlow: { ...finalFlow },
   };
   outbox = outbox.map((item) => item.sessionId === researchSession.id
     ? { ...item, token: researchSession.token }
@@ -2894,8 +3131,15 @@ const startSession = async (code, allowResume = true, forceNew = false) => {
   } else if ((Number(data.state.progress_revision) || 0) >= previousRevision) {
     applyProgressSnapshot(data.state.progress_snapshot);
   }
+  if (researchSession.completedAt) {
+    finalFlow.screen = 55;
+    finalFlow.completionStatus = "completed";
+    finalFlow.completionError = "";
+    saveFinalFlow();
+  }
   beginActivityTracking();
-  flushOutbox();
+  if (finalFlow.screen === 55) await restoreFinalScreenState();
+  else flushOutbox();
 };
 
 const completeCurrentScene = (sceneIndex) => {
@@ -3600,6 +3844,35 @@ document.addEventListener("click", async (event) => {
     window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
+  if (action === "open-final-narrative") {
+    if (isReviewMode || situationFiveProgress.stage !== 11) return;
+    finalFlow.screen = 54;
+    setFinalFlowStatus("idle");
+    queueProgressSnapshot();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "open-final-screen") {
+    if (isReviewMode || finalFlow.screen !== 54) return;
+    collectActiveSlice();
+    finalFlow.screen = 55;
+    ensureCompletionEventId();
+    setFinalFlowStatus("syncing");
+    queueProgressSnapshot();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    await synchronizeFinalScreen();
+    return;
+  }
+  if (action === "retry-final-sync") {
+    await synchronizeFinalScreen();
+    return;
+  }
+  if (action === "finalize-session") {
+    await finalizeSession();
+    return;
+  }
   if (action === "s5-build-equation") {
     persistSituationFiveDraft();
     const expressionOne = String(situationFiveProgress.answers.s5_receta1_total || "");
@@ -3709,7 +3982,7 @@ document.addEventListener("visibilitychange", () => {
     collectActiveSlice();
     activeStartedAt = null;
     flushActivity();
-  } else if (researchSession) {
+  } else if (researchSession && !isReviewMode && !researchSession.completedAt) {
     activeStartedAt = performance.now();
     flushActivity();
   }
@@ -3789,10 +4062,17 @@ const initialize = async () => {
       researchSession.progressRevision = serverRevision;
       applyProgressSnapshot(data.state.progress_snapshot);
     }
+    if (researchSession.completedAt) {
+      finalFlow.screen = 55;
+      finalFlow.completionStatus = "completed";
+      finalFlow.completionError = "";
+    }
+    saveFinalFlow();
     saveResearchSession();
     beginActivityTracking();
     render();
-    flushOutbox();
+    if (finalFlow.screen === 55) await restoreFinalScreenState();
+    else flushOutbox();
   } catch (error) {
     if (error.status === 401 || error.status === 404) {
       localStorage.removeItem(SESSION_STORAGE_KEY);
@@ -3806,6 +4086,7 @@ const initialize = async () => {
     state.currentScene = sceneForScreen(currentScreenForProgress());
     beginActivityTracking();
     render();
+    if (finalFlow.screen === 55) await restoreFinalScreenState();
   }
 };
 

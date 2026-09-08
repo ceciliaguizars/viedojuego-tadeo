@@ -247,6 +247,74 @@ def test_v2_completion_is_idempotent_and_stops_activity(client, participant_code
     assert after.json()["active_seconds"] == 12.5
 
 
+def test_v2_final_screens_persist_complete_and_recover(client, participant_code):
+    session = start_v2(client, participant_code)
+    session_id = session["state"]["session_id"]
+    headers = auth(session["session_token"])
+    completion_id = str(uuid.uuid4())
+    screen_54 = {
+        "intro_phase": "game",
+        "final_flow": {
+            "current_screen": 54,
+            "completion_event_id": None,
+            "completion_status": "idle",
+            "completion_error": "",
+        },
+    }
+    screen_55 = {
+        "intro_phase": "game",
+        "final_flow": {
+            "current_screen": 55,
+            "completion_event_id": completion_id,
+            "completion_status": "syncing",
+            "completion_error": "",
+        },
+    }
+
+    saved_54 = client.put(
+        f"/api/v2/sessions/{session_id}/progress",
+        headers=headers,
+        json={"current_screen": 54, "progress_revision": 54, "progress_snapshot": screen_54},
+    )
+    saved_55 = client.put(
+        f"/api/v2/sessions/{session_id}/progress",
+        headers=headers,
+        json={"current_screen": 55, "progress_revision": 55, "progress_snapshot": screen_55},
+    )
+    before_complete = client.get(f"/api/v2/sessions/{session_id}/state", headers=headers)
+    completed = client.post(
+        f"/api/v2/sessions/{session_id}/complete",
+        headers=headers,
+        json={"completion_event_id": completion_id},
+    )
+    duplicate = client.post(
+        f"/api/v2/sessions/{session_id}/complete",
+        headers=headers,
+        json={"completion_event_id": completion_id},
+    )
+    recovered = client.get(f"/api/v2/sessions/{session_id}/state", headers=headers)
+    late_activity = client.post(
+        f"/api/v2/sessions/{session_id}/activity",
+        headers=headers,
+        json={"event_id": str(uuid.uuid4()), "active_seconds": 8},
+    )
+
+    assert saved_54.json()["applied"] is True
+    assert saved_54.json()["state"]["current_screen"] == 54
+    assert saved_55.json()["applied"] is True
+    assert before_complete.json()["state"]["current_screen"] == 55
+    assert before_complete.json()["state"]["progress_snapshot"] == screen_55
+    assert completed.json()["state"]["status"] == "completed"
+    assert completed.json()["state"]["completed_at"]
+    assert completed.json()["state"]["ended_reason"] == "completed"
+    assert duplicate.json()["duplicate"] is True
+    assert duplicate.json()["state"]["completed_at"] == completed.json()["state"]["completed_at"]
+    assert recovered.json()["state"]["current_screen"] == 55
+    assert recovered.json()["state"]["status"] == "completed"
+    assert recovered.json()["state"]["completed_at"] == completed.json()["state"]["completed_at"]
+    assert late_activity.json()["ignored"] is True
+
+
 def test_v2_rejects_validation_on_open_fields(client, participant_code):
     session = start_v2(client, participant_code)
     response = client.post(
