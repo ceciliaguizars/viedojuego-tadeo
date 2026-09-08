@@ -35,7 +35,7 @@
         <p>Creado el {{ row.application.created_at.strftime('%d/%m/%Y') }}</p>
         <dl class="mini-stats">
           <div><dt>Participantes</dt><dd>{{ row.summary.participants }}</dd></div>
-          <div><dt>Finalización</dt><dd>{{ row.summary.completion_rate if row.summary.completion_rate is not none else '—' }}{% if row.summary.completion_rate is not none %}%{% endif %}</dd></div>
+          <div><dt>Completadas</dt><dd>{{ row.summary.completed }}</dd></div>
           <div><dt>Sesiones</dt><dd>{{ row.summary.sessions }}</dd></div>
         </dl>
         <span class="card-link">Administrar grupo</span>

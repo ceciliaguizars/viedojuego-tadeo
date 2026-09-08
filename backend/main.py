@@ -28,6 +28,13 @@ from .models import (
     utc_now,
 )
 from .rag import RagError, RagService, rag_status
+from .research import (
+    final_application_summary,
+    final_response_csv_rows,
+    final_session_detail,
+    final_session_summary,
+    version_label,
+)
 from .schemas import (
     ActivityRequest,
     ActivityV2Request,
@@ -587,16 +594,23 @@ def admin_home(request: Request, database: Session = Depends(get_db)) -> Respons
     ).all()
     rows = []
     for application in applications:
-        sessions = database.scalars(
+        sessions = list(database.scalars(
             select(GameSession)
             .join(ParticipantCode)
-            .options(selectinload(GameSession.attempts))
-            .where(
-                ParticipantCode.application_id == application.id,
-                GameSession.experience_version == "legacy-1",
+            .options(
+                selectinload(GameSession.attempts),
+                selectinload(GameSession.response_submissions).selectinload(ResponseSubmission.values),
             )
-        ).all()
-        rows.append({"application": application, "summary": application_summary(sessions)})
+            .where(ParticipantCode.application_id == application.id)
+        ).all())
+        rows.append({
+            "application": application,
+            "summary": {
+                "participants": len({item.participant_code_id for item in sessions}),
+                "sessions": len(sessions),
+                "completed": sum(item.status == "completed" for item in sessions),
+            },
+        })
     dashboard_summary = {
         "applications": len(rows),
         "participants": sum(int(row["summary"]["participants"]) for row in rows),
@@ -718,11 +732,12 @@ def _load_application_detail(database: Session, application_id: int) -> tuple[Ap
         database.scalars(
             select(GameSession)
             .join(ParticipantCode)
-            .options(selectinload(GameSession.attempts), selectinload(GameSession.participant_code))
-            .where(
-                ParticipantCode.application_id == application_id,
-                GameSession.experience_version == "legacy-1",
+            .options(
+                selectinload(GameSession.attempts),
+                selectinload(GameSession.response_submissions).selectinload(ResponseSubmission.values),
+                selectinload(GameSession.participant_code),
             )
+            .where(ParticipantCode.application_id == application_id)
             .order_by(GameSession.started_at.desc())
         ).all()
     )
@@ -738,12 +753,24 @@ def application_detail(
     require_admin(request)
     mark_stale_sessions(database)
     application, sessions = _load_application_detail(database, application_id)
+    legacy_sessions = [item for item in sessions if item.experience_version == "legacy-1"]
+    final_sessions = [item for item in sessions if item.experience_version == FINAL_EXPERIENCE_VERSION]
     codes = database.scalars(
         select(ParticipantCode)
         .where(ParticipantCode.application_id == application_id)
         .order_by(ParticipantCode.first_used_at.is_not(None), ParticipantCode.code)
     ).all()
-    session_rows = [{"session": item, "metrics": session_metrics(item)} for item in sessions]
+    session_rows = [
+        {
+            "session": item,
+            "is_final": item.experience_version == FINAL_EXPERIENCE_VERSION,
+            "version_label": version_label(item.experience_version),
+            "metrics": session_metrics(item) if item.experience_version == "legacy-1" else None,
+            "research": final_session_summary(item)
+            if item.experience_version == FINAL_EXPERIENCE_VERSION else None,
+        }
+        for item in sessions
+    ]
     available_codes = [item for item in codes if item.is_active and item.first_used_at is None]
     used_codes = [item for item in codes if item.first_used_at is not None]
     return templates.TemplateResponse(
@@ -756,8 +783,11 @@ def application_detail(
             available_codes=available_codes,
             used_codes=used_codes,
             session_rows=session_rows,
-            summary=application_summary(sessions),
-            difficulty=difficulty_by_scene(sessions),
+            summary=application_summary(legacy_sessions),
+            final_summary=final_application_summary(final_sessions),
+            has_legacy=bool(legacy_sessions),
+            has_final=bool(final_sessions),
+            difficulty=difficulty_by_scene(legacy_sessions),
         ),
     )
 
@@ -811,6 +841,16 @@ def admin_session_detail(
     game_session = load_session(database, session_id)
     if not game_session:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    if game_session.experience_version == FINAL_EXPERIENCE_VERSION:
+        return templates.TemplateResponse(
+            request=request,
+            name="session_final.html",
+            context=_admin_context(
+                request,
+                game_session=game_session,
+                research=final_session_detail(game_session),
+            ),
+        )
     attempts_by_scene = []
     for scene_index in range(5):
         attempts_by_scene.append(
@@ -878,6 +918,7 @@ def export_codes(application_id: int, request: Request, database: Session = Depe
 def export_sessions(application_id: int, request: Request, database: Session = Depends(get_db)) -> Response:
     require_admin(request)
     application, sessions = _load_application_detail(database, application_id)
+    sessions = [item for item in sessions if item.experience_version == "legacy-1"]
     rows: list[list[object]] = [[
         "aplicacion", "folio", "sesion", "tipo", "estado", "inicio_utc", "fin_utc",
         "retos_completados", "intentos", "exactitud_primer_intento_pct",
@@ -907,6 +948,7 @@ def export_sessions(application_id: int, request: Request, database: Session = D
 def export_attempts(application_id: int, request: Request, database: Session = Depends(get_db)) -> Response:
     require_admin(request)
     application, sessions = _load_application_detail(database, application_id)
+    sessions = [item for item in sessions if item.experience_version == "legacy-1"]
     rows: list[list[object]] = [[
         "aplicacion", "folio", "sesion", "tipo", "situacion", "pregunta", "numero_intento",
         "correcta", "respuestas_json", "enviado_utc", "tiempo_activo_al_enviar_seg",
@@ -929,6 +971,21 @@ def export_attempts(application_id: int, request: Request, database: Session = D
                 attempt.active_seconds_at_submit,
             ])
     return _csv_response(rows, f"{application.id}-intentos.csv")
+
+
+@app.get("/admin/applications/{application_id}/exports/responses-v2.csv")
+def export_final_responses(
+    application_id: int,
+    request: Request,
+    database: Session = Depends(get_db),
+) -> Response:
+    require_admin(request)
+    application, sessions = _load_application_detail(database, application_id)
+    final_sessions = [
+        item for item in sessions if item.experience_version == FINAL_EXPERIENCE_VERSION
+    ]
+    rows = final_response_csv_rows(application.name, final_sessions)
+    return _csv_response(rows, f"{application.id}-respuestas-tadeo-final.csv")
 
 
 @app.get("/{path:path}", response_class=FileResponse)

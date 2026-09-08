@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ game_session.participant_code.code }} · Tadeo final{% endblock %}
+{% block content %}
+  <nav class="breadcrumbs" aria-label="Migas de pan">
+    <a href="/admin">Mis grupos</a><span aria-hidden="true">/</span><a href="/admin/applications/{{ game_session.participant_code.application_id }}">{{ game_session.participant_code.application.name }}</a><span aria-hidden="true">/</span><span aria-current="page">{{ game_session.participant_code.code }}</span>
+  </nav>
+
+  <div class="page-heading research-heading">
+    <div>
+      <p class="kicker">Detalle de investigación · <span class="version-label final">Tadeo final</span></p>
+      <h1>Folio {{ game_session.participant_code.code }}</h1>
+      <p class="page-lead">Respuestas literales y trayectoria de la sesión, sin calificación ni interpretación automática.</p>
+    </div>
+    <span class="status-label large {{ game_session.status }}">{{ research.summary.status_label }}</span>
+  </div>
+
+  <section class="stat-grid research-session-stats" aria-label="Resumen de la sesión">
+    <article class="stat panel"><span>Grupo</span><strong class="small-value">{{ game_session.participant_code.application.name }}</strong></article>
+    <article class="stat panel"><span>Session ID</span><strong class="technical-id">{{ game_session.id }}</strong></article>
+    <article class="stat panel"><span>Progreso</span><strong class="small-value">Pantalla {{ research.summary.current_screen }} de 55</strong><small>{{ 'Recorrido completado' if research.summary.completed else 'Recorrido en progreso' }}</small></article>
+    <article class="stat panel"><span>Respuestas registradas</span><strong>{{ research.summary.response_count }}</strong></article>
+    <article class="stat panel"><span>Duración total</span><strong>{{ research.summary.duration_seconds|duration }}</strong><small>inicio a {{ 'finalización' if game_session.completed_at else 'consulta' }}</small></article>
+    <article class="stat panel"><span>Tiempo activo registrado</span><strong>{{ research.summary.active_seconds|duration }}</strong><small>No equivale necesariamente a duración total</small></article>
+  </section>
+
+  <section class="panel session-timestamps" aria-label="Fechas de la sesión">
+    <dl>
+      <div><dt>Versión</dt><dd>tadeo-final-1</dd></div>
+      <div><dt>Inicio</dt><dd>{{ game_session.started_at.isoformat() }}</dd></div>
+      <div><dt>Finalización</dt><dd>{{ game_session.completed_at.isoformat() if game_session.completed_at else 'Sin finalización registrada' }}</dd></div>
+    </dl>
+  </section>
+
+  <nav class="section-nav research-situation-nav" aria-label="Situaciones de la sesión">
+    {% for situation in research.situations %}<a href="#situacion-{{ situation.number }}">Situación {{ situation.number }} <span>{{ situation.responded_fields }}/{{ situation.total_fields }}</span></a>{% endfor %}
+  </nav>
+
+  {% for situation in research.situations %}
+    <section class="panel research-situation" id="situacion-{{ situation.number }}">
+      <div class="research-situation-heading">
+        <div><p class="kicker">Trayectoria didáctica</p><h2>Situación {{ situation.number }}</h2></div>
+        <dl class="situation-summary">
+          <div><dt>Campos respondidos</dt><dd>{{ situation.responded_fields }}/{{ situation.total_fields }}</dd></div>
+          <div><dt>Intentos adicionales</dt><dd>{{ situation.additional_attempts }}</dd></div>
+        </dl>
+      </div>
+
+      <div class="research-field-list">
+        {% for field in situation.fields %}
+          <article class="research-field {{ 'unanswered' if not field.responses else '' }}">
+            <header><div><h3>{{ field.label }}</h3><code>{{ field.field_id }}</code></div></header>
+            {% if field.responses %}
+              <ol class="response-list">
+                {% for response in field.responses %}
+                  <li class="response-record">
+                    <div class="response-meta">
+                      <strong>{{ 'Intento ' ~ response.attempt_number if response.attempt_number is not none else 'Registro' }}</strong>
+                      <span class="answer-label {{ response.validation_class }}">{{ response.validation_label }}</span>
+                      <span>Tipo: <code>{{ response.field_type }}</code></span>
+                    </div>
+                    <pre class="literal-response">{{ response.literal_value }}</pre>
+                    <dl class="response-trace">
+                      <div><dt>validation_result</dt><dd>{{ response.validation_result|string|lower if response.validation_result is not none else 'null' }}</dd></div>
+                      <div><dt>Envío del cliente</dt><dd>{{ response.client_created_at.isoformat() if response.client_created_at else 'No registrado' }}</dd></div>
+                      <div><dt>Registro del servidor</dt><dd>{{ response.submitted_at.isoformat() }}</dd></div>
+                    </dl>
+                  </li>
+                {% endfor %}
+              </ol>
+            {% else %}
+              <p class="missing-response">Sin respuesta registrada</p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% endfor %}
+{% endblock %}

@@ -56,17 +56,20 @@ if (printButton) printButton.addEventListener("click", () => window.print());
 
 const searchInput = document.querySelector("[data-result-search]");
 const statusFilter = document.querySelector("[data-status-filter]");
+const versionFilter = document.querySelector("[data-version-filter]");
 const resultRows = [...document.querySelectorAll("[data-code-row]")];
 const filterEmpty = document.querySelector("[data-filter-empty]");
 
 const filterResults = () => {
   const query = (searchInput?.value || "").trim().toUpperCase();
   const selectedStatus = statusFilter?.value || "";
+  const selectedVersion = versionFilter?.value || "";
   let visible = 0;
   resultRows.forEach((row) => {
     const matchesCode = !query || row.dataset.codeRow.includes(query);
     const matchesStatus = !selectedStatus || row.dataset.status === selectedStatus;
-    row.hidden = !(matchesCode && matchesStatus);
+    const matchesVersion = !selectedVersion || row.dataset.version === selectedVersion;
+    row.hidden = !(matchesCode && matchesStatus && matchesVersion);
     if (!row.hidden) visible += 1;
   });
   if (filterEmpty) filterEmpty.hidden = visible > 0 || resultRows.length === 0;
@@ -74,3 +77,4 @@ const filterResults = () => {
 
 searchInput?.addEventListener("input", filterResults);
 statusFilter?.addEventListener("change", filterResults);
+versionFilter?.addEventListener("change", filterResults);

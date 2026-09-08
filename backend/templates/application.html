@@ -17,8 +17,9 @@
       <details class="export-menu">
         <summary class="button">Exportar resultados</summary>
         <div>
-          <a href="/admin/applications/{{ application.id }}/exports/sessions.csv">Resumen por sesión</a>
-          <a href="/admin/applications/{{ application.id }}/exports/attempts.csv">Historial de intentos</a>
+          <a href="/admin/applications/{{ application.id }}/exports/responses-v2.csv">Respuestas · Tadeo final</a>
+          <a href="/admin/applications/{{ application.id }}/exports/sessions.csv">Sesiones · Legacy</a>
+          <a href="/admin/applications/{{ application.id }}/exports/attempts.csv">Intentos · Legacy</a>
         </div>
       </details>
     </div>
@@ -28,22 +29,35 @@
     <a href="#resumen">Resumen</a>
     <a href="#codigos">Folios <span>{{ codes|length }}</span></a>
     <a href="#resultados">Resultados <span>{{ session_rows|length }}</span></a>
-    <a href="#dificultad">Dificultad</a>
+    {% if has_legacy %}<a href="#dificultad">Dificultad legacy</a>{% endif %}
   </nav>
 
   <section id="resumen" aria-labelledby="summary-title">
     <div class="section-title-row">
       <div><p class="kicker">Vista rápida</p><h2 id="summary-title">Resumen del grupo</h2></div>
-      <p>Los promedios consideran las sesiones principales.</p>
+      <p>Las experiencias se presentan por separado para no mezclar sus métricas.</p>
     </div>
-    <div class="stat-grid">
-      <article class="stat panel"><span>Participantes</span><strong>{{ summary.participants }}</strong><small>{{ summary.sessions }} sesiones totales</small></article>
-      <article class="stat panel"><span>Finalización</span><strong>{{ summary.completion_rate if summary.completion_rate is not none else '—' }}{% if summary.completion_rate is not none %}%{% endif %}</strong><small>sesiones principales</small></article>
-      <article class="stat panel"><span>Correctas al primer intento</span><strong>{{ summary.mean_first_try_accuracy if summary.mean_first_try_accuracy is not none else '—' }}{% if summary.mean_first_try_accuracy is not none %}%{% endif %}</strong><small>promedio del grupo</small></article>
-      <article class="stat panel"><span>Exactitud global</span><strong>{{ summary.mean_global_accuracy if summary.mean_global_accuracy is not none else '—' }}{% if summary.mean_global_accuracy is not none %}%{% endif %}</strong><small>todos los envíos</small></article>
-      <article class="stat panel"><span>Tiempo activo medio</span><strong>{{ summary.mean_active_seconds|duration }}</strong><small>sesiones completadas</small></article>
-      <article class="stat panel"><span>Duración mediana</span><strong>{{ summary.median_elapsed_seconds|duration }}</strong><small>sesiones completadas</small></article>
-    </div>
+    {% if has_final %}
+      <div class="version-summary-heading"><span class="version-label final">Tadeo final</span><p>Resumen descriptivo, sin calificación ni precisión global.</p></div>
+      <div class="stat-grid research-summary-grid">
+        <article class="stat panel"><span>Participantes</span><strong>{{ final_summary.participants }}</strong></article>
+        <article class="stat panel"><span>Sesiones</span><strong>{{ final_summary.sessions }}</strong></article>
+        <article class="stat panel"><span>Completadas</span><strong>{{ final_summary.completed }}</strong></article>
+        <article class="stat panel"><span>En progreso</span><strong>{{ final_summary.in_progress }}</strong></article>
+        <article class="stat panel"><span>Respuestas registradas</span><strong>{{ final_summary.responses }}</strong></article>
+      </div>
+    {% endif %}
+    {% if has_legacy %}
+      <div class="version-summary-heading"><span class="version-label legacy">legacy-1</span><p>Métricas históricas exclusivas de la experiencia legacy.</p></div>
+      <div class="stat-grid">
+        <article class="stat panel"><span>Participantes</span><strong>{{ summary.participants }}</strong><small>{{ summary.sessions }} sesiones legacy</small></article>
+        <article class="stat panel"><span>Finalización</span><strong>{{ summary.completion_rate if summary.completion_rate is not none else '—' }}{% if summary.completion_rate is not none %}%{% endif %}</strong><small>sesiones principales legacy</small></article>
+        <article class="stat panel"><span>Correctas al primer intento</span><strong>{{ summary.mean_first_try_accuracy if summary.mean_first_try_accuracy is not none else '—' }}{% if summary.mean_first_try_accuracy is not none %}%{% endif %}</strong><small>promedio legacy</small></article>
+        <article class="stat panel"><span>Exactitud global</span><strong>{{ summary.mean_global_accuracy if summary.mean_global_accuracy is not none else '—' }}{% if summary.mean_global_accuracy is not none %}%{% endif %}</strong><small>envíos legacy</small></article>
+        <article class="stat panel"><span>Tiempo activo medio</span><strong>{{ summary.mean_active_seconds|duration }}</strong><small>sesiones legacy completadas</small></article>
+        <article class="stat panel"><span>Duración mediana</span><strong>{{ summary.median_elapsed_seconds|duration }}</strong><small>sesiones legacy completadas</small></article>
+      </div>
+    {% endif %}
   </section>
 
   <section class="panel code-manager" id="codigos" aria-labelledby="codes-title">
@@ -108,30 +122,47 @@
           <option value="abandoned">Abandonado</option>
         </select>
       </label>
+      <label for="version-filter">Versión
+        <select id="version-filter" data-version-filter>
+          <option value="">Todas</option>
+          <option value="tadeo-final-1">Tadeo final</option>
+          <option value="legacy-1">legacy-1</option>
+        </select>
+      </label>
     </div>
 
     <div class="table-wrap"><table>
-      <thead><tr><th>Folio</th><th>Sesión</th><th>Estado</th><th>Progreso</th><th>Intentos</th><th>1er intento</th><th>Global</th><th>Activo</th><th>Total</th></tr></thead>
+      <thead><tr><th>Folio</th><th>Grupo</th><th>Session ID</th><th>Versión</th><th>Estado</th><th>Inicio</th><th>Finalización</th><th>Progreso</th><th>Respuestas</th><th>Tiempo activo registrado</th><th>Duración total</th></tr></thead>
       <tbody data-result-rows>
-        {% for row in session_rows %}<tr data-code-row="{{ row.session.participant_code.code }}" data-status="{{ row.session.status }}">
+        {% for row in session_rows %}<tr data-code-row="{{ row.session.participant_code.code }}" data-status="{{ row.session.status }}" data-version="{{ row.session.experience_version }}">
           <td><a class="session-link" href="/admin/sessions/{{ row.session.id }}"><strong>{{ row.session.participant_code.code }}</strong><span>Ver detalle</span></a></td>
-          <td>{{ 'Principal' if row.session.is_primary else 'Repetición ' ~ row.session.sequence }}</td>
-          <td><span class="status-label {{ row.session.status }}">{{ {'in_progress': 'En curso', 'completed': 'Completado', 'abandoned': 'Abandonado'}.get(row.session.status, row.session.status) }}</span></td>
-          <td><strong>{{ row.metrics.challenges_completed }}/5</strong><small class="cell-note">{{ row.metrics.questions_completed }}/21 preguntas</small></td>
-          <td>{{ row.metrics.attempts_total }}</td>
-          <td>{{ row.metrics.first_try_accuracy if row.metrics.first_try_accuracy is not none else '—' }}{% if row.metrics.first_try_accuracy is not none %}%{% endif %}</td>
-          <td>{{ row.metrics.global_accuracy if row.metrics.global_accuracy is not none else '—' }}{% if row.metrics.global_accuracy is not none %}%{% endif %}</td>
-          <td>{{ row.metrics.active_seconds|duration }}</td><td>{{ row.metrics.elapsed_seconds|duration }}</td>
-        </tr>{% else %}<tr><td colspan="9"><div class="empty inline-empty"><h3>Aún no hay resultados</h3><p>Los datos aparecerán cuando un estudiante inicie con uno de estos folios.</p></div></td></tr>{% endfor %}
+          <td>{{ application.name }}</td>
+          <td><code>{{ row.session.id }}</code><small class="cell-note">{{ 'Principal' if row.session.is_primary else 'Repetición ' ~ row.session.sequence }}</small></td>
+          <td><span class="version-label {{ 'final' if row.is_final else 'legacy' }}">{{ row.version_label }}</span></td>
+          <td><span class="status-label {{ row.session.status }}">{{ row.research.status_label if row.is_final else {'in_progress': 'En curso', 'completed': 'Completado', 'abandoned': 'Abandonado'}.get(row.session.status, row.session.status) }}</span></td>
+          <td>{{ row.session.started_at.isoformat() }}</td>
+          <td>{{ row.session.completed_at.isoformat() if row.session.completed_at else '—' }}</td>
+          {% if row.is_final %}
+            <td><strong>Pantalla {{ row.research.current_screen }} de 55</strong>{% if row.research.completed %}<small class="cell-note">Recorrido completado</small>{% endif %}</td>
+            <td>{{ row.research.response_count }}</td>
+            <td>{{ row.research.active_seconds|duration }}</td>
+            <td>{{ row.research.duration_seconds|duration }}</td>
+          {% else %}
+            <td><strong>{{ row.metrics.challenges_completed }}/5 retos</strong><small class="cell-note">{{ row.metrics.questions_completed }}/21 preguntas · legacy</small></td>
+            <td>{{ row.metrics.attempts_total }} intentos legacy</td>
+            <td>{{ row.metrics.active_seconds|duration }}</td>
+            <td>{{ row.metrics.elapsed_seconds|duration }}</td>
+          {% endif %}
+        </tr>{% else %}<tr><td colspan="11"><div class="empty inline-empty"><h3>Aún no hay resultados</h3><p>Los datos aparecerán cuando un estudiante inicie con uno de estos folios.</p></div></td></tr>{% endfor %}
       </tbody>
     </table></div>
     <p class="filter-empty" data-filter-empty hidden>No hay sesiones que coincidan con la búsqueda.</p>
   </section>
 
-  <section class="panel difficulty-panel" id="dificultad" aria-labelledby="difficulty-title">
+  {% if has_legacy %}<section class="panel difficulty-panel" id="dificultad" aria-labelledby="difficulty-title">
     <div class="section-title-row">
-      <div><p class="kicker">Análisis</p><h2 id="difficulty-title">Dificultad por reto</h2></div>
-      <p>Úsalo para identificar dónde necesita apoyo el grupo.</p>
+      <div><p class="kicker">Análisis legacy-1</p><h2 id="difficulty-title">Dificultad por reto</h2></div>
+      <p>Estas métricas pertenecen exclusivamente a sesiones legacy-1.</p>
     </div>
     <div class="table-wrap"><table>
       <thead><tr><th>Reto</th><th>Sesiones</th><th>Preguntas</th><th>Intentos</th><th>1er intento</th><th>Global</th></tr></thead>
@@ -141,7 +172,7 @@
         <td>{{ row.global_accuracy if row.global_accuracy is not none else '—' }}{% if row.global_accuracy is not none %}%{% endif %}</td>
       </tr>{% endfor %}</tbody>
     </table></div>
-  </section>
+  </section>{% endif %}
 
   <details class="danger-zone panel">
     <summary>Administrar o eliminar este grupo</summary>
