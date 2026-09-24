@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 APP_SOURCE = (ROOT / "js" / "app.js").read_text(encoding="utf-8")
 CSS_SOURCE = (ROOT / "css" / "main.css").read_text(encoding="utf-8")
+INDEX_SOURCE = (ROOT / "index.html").read_text(encoding="utf-8")
 ACTIVE_DOCS = [
     ROOT / "README.md",
     ROOT / "tadeo_videojuego" / "Bienvenido.md",
@@ -527,6 +528,11 @@ def test_completed_session_can_start_a_separate_full_retake():
     assert "await startSession(code, false, true);" in restart
     assert 'setIntroPhase("presentation");' in restart
     assert "localStorage.removeItem" not in restart
+
+
+def test_frontend_assets_have_a_release_version_to_avoid_stale_browser_cache():
+    assert './css/main.css?v=tadeo-3situaciones-reintento-1' in INDEX_SOURCE
+    assert './js/app.js?v=tadeo-3situaciones-reintento-1' in INDEX_SOURCE
 
 
 def test_completed_agenda_closing_and_finalization_use_progress_not_scores():
