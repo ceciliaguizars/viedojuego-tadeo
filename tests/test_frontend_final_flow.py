@@ -511,7 +511,22 @@ def test_final_screen_has_no_score_or_legacy_results_actions():
     assert "Tus respuestas han sido registradas." in renderer
     assert "questions_completed" not in renderer
     assert "discoveries" not in renderer
-    assert 'data-action="reset"' not in renderer
+    assert 'data-action="restart-completed-session"' in APP_SOURCE
+
+
+def test_completed_session_can_start_a_separate_full_retake():
+    controls = APP_SOURCE.split("const finalScreenControls = () =>", 1)[1].split(
+        "const renderFinalScreen", 1
+    )[0]
+    restart = APP_SOURCE.split('if (action === "restart-completed-session")', 1)[1].split(
+        'if (action === "s1-restart")', 1
+    )[0]
+    assert "VOLVER A JUGAR" in controls
+    assert "researchSession?.completedAt" in controls
+    assert "isReviewMode || !researchSession?.completedAt" in restart
+    assert "await startSession(code, false, true);" in restart
+    assert 'setIntroPhase("presentation");' in restart
+    assert "localStorage.removeItem" not in restart
 
 
 def test_completed_agenda_closing_and_finalization_use_progress_not_scores():

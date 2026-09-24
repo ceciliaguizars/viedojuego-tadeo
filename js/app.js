@@ -2988,7 +2988,8 @@ const finalScreenControls = () => {
   if (researchSession?.completedAt || finalFlow.completionStatus === "completed") {
     return `
       <p class="feedback success" role="status">Finalización confirmada.</p>
-      <button class="primary-button" type="button" disabled>FINALIZADO</button>`;
+      <button class="primary-button" type="button" disabled>FINALIZADO</button>
+      <button class="secondary-button" type="button" data-action="restart-completed-session">VOLVER A JUGAR</button>`;
   }
   if (finalFlow.completionStatus === "syncing" || finalFlow.completionStatus === "completing") {
     return `
@@ -5440,6 +5441,24 @@ document.addEventListener("click", async (event) => {
     setIntroPhase("home");
     render();
     window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "restart-completed-session") {
+    if (isReviewMode || !researchSession?.completedAt) return;
+    const code = researchSession.code;
+    actionElement.disabled = true;
+    actionElement.textContent = "PREPARANDO…";
+    try {
+      await startSession(code, false, true);
+      setIntroPhase("presentation");
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      showToast("Se inició un nuevo recorrido.");
+    } catch (error) {
+      showToast(error.message);
+      actionElement.disabled = false;
+      actionElement.textContent = "VOLVER A JUGAR";
+    }
     return;
   }
   if (action === "s1-restart") {
