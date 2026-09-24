@@ -47,6 +47,9 @@ def test_discover_documents_is_sorted_and_filters_extensions(tmp_path: Path) -> 
     (tmp_path / "b.md").write_text("B", encoding="utf-8")
     (tmp_path / "a.txt").write_text("A", encoding="utf-8")
     (tmp_path / "ignore.json").write_text("{}", encoding="utf-8")
+    archive = tmp_path / "99 Archivo histórico"
+    archive.mkdir()
+    (archive / "situacion-anterior.md").write_text("Histórico", encoding="utf-8")
 
     documents = discover_documents([tmp_path])
 

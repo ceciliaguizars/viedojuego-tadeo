@@ -5,8 +5,11 @@ import io
 import uuid
 from pathlib import Path
 
-from backend.research import FIELD_LABELS, FINAL_FIELDS
+from backend.database import SessionLocal
+from backend.models import ParticipantCode
+from backend.research import FIELD_LABELS, FINAL_FIELDS, THREE_SITUATIONS_FIELDS, field_labels_for
 from backend.security import ADMIN_COOKIE, create_admin_cookie
+from backend.services import create_or_resume_session
 
 
 def auth(token: str) -> dict[str, str]:
@@ -14,6 +17,24 @@ def auth(token: str) -> dict[str, str]:
 
 
 def start_final(client, code: str, **extra) -> dict:
+    del client, extra
+    with SessionLocal() as database:
+        participant = database.query(ParticipantCode).filter_by(code=code).one()
+        game_session, token, _ = create_or_resume_session(
+            database,
+            participant,
+            None,
+            None,
+            experience_version="tadeo-final-1",
+            force_new=True,
+        )
+        return {
+            "session_token": token,
+            "state": {"session_id": game_session.id},
+        }
+
+
+def start_current(client, code: str, **extra) -> dict:
     response = client.post("/api/v2/sessions", json={"code": code, **extra})
     assert response.status_code == 200
     return response.json()
@@ -66,6 +87,7 @@ def login_admin(client) -> None:
 def test_panel_lists_final_and_legacy_without_mixing_metrics(client, participant_code):
     legacy = start_legacy(client, participant_code)
     final = start_final(client, participant_code)
+    current = start_current(client, participant_code)
     login_admin(client)
 
     page = client.get("/admin/applications/1")
@@ -73,12 +95,17 @@ def test_panel_lists_final_and_legacy_without_mixing_metrics(client, participant
     assert page.status_code == 200
     assert legacy["state"]["session_id"] in page.text
     assert final["state"]["session_id"] in page.text
+    assert current["state"]["session_id"] in page.text
     assert 'data-version="legacy-1"' in page.text
     assert 'data-version="tadeo-final-1"' in page.text
+    assert 'data-version="tadeo-3situaciones-1"' in page.text
     assert "Tadeo final" in page.text
+    assert "Tadeo · 3 situaciones" in page.text
     final_row = page.text.split(final["state"]["session_id"], 1)[1].split("</tr>", 1)[0]
     assert "Pantalla 2 de 55" in final_row
     assert "/21 preguntas" not in final_row
+    current_row = page.text.split(current["state"]["session_id"], 1)[1].split("</tr>", 1)[0]
+    assert "Pantalla 2 de 31" in current_row
     legacy_row = page.text.split(legacy["state"]["session_id"], 1)[1].split("</tr>", 1)[0]
     assert "/21 preguntas · legacy" in legacy_row
     assert "data-version-filter" in page.text
@@ -96,6 +123,112 @@ def test_final_only_panel_does_not_render_legacy_accuracy(client, participant_co
     assert "Exactitud global" not in page.text
 
 
+def test_current_only_panel_labels_its_summary_without_historical_final(client, participant_code):
+    start_current(client, participant_code)
+    login_admin(client)
+
+    page = client.get("/admin/applications/1")
+
+    assert page.status_code == 200
+    summary = page.text.split('id="resumen"', 1)[1].split('id="codigos"', 1)[0]
+    assert "Tadeo · 3 situaciones" in summary
+    assert "Tadeo final" not in summary
+    assert "Respuestas · experiencias Tadeo" in page.text
+
+
+def test_current_detail_uses_the_new_situation_catalogs(client, participant_code):
+    current = start_current(client, participant_code)
+    login_admin(client)
+
+    detail = client.get(f"/admin/sessions/{current['state']['session_id']}")
+
+    assert detail.status_code == 200
+    assert "Situación 1. Organizando el tiempo" in detail.text
+    assert "Situación 2. En la papelería" in detail.text
+    assert "Situación 3. Registrando su dinero" in detail.text
+    assert "s1_tiempo_total" in detail.text
+    assert "s1_igualdad_valor_2" in detail.text
+    assert "s2_informacion_conocida" in detail.text
+    assert "s2_comprobacion_igualdad" in detail.text
+    assert "s3_regalo_elegido" in detail.text
+    assert "s3_registro_completado" in detail.text
+    assert "s1_explora_a" not in detail.text
+    assert "Alimentando a su mascota" not in detail.text
+    assert "Ayudando con la cena" not in detail.text
+
+
+def test_current_completed_detail_shows_literal_attempts_and_completed_at(client, participant_code):
+    current = start_current(client, participant_code)
+    submit_final_value(
+        client,
+        current,
+        field_id="s3_que_averiguar",
+        field_type="open_text",
+        literal_value="  Cuánto recibió Tadeo cada vez.  ",
+        screen=22,
+    )
+    submit_final_value(
+        client,
+        current,
+        field_id="s3_valor_x",
+        field_type="objective_numeric",
+        literal_value="100",
+        validation_result=False,
+        activity_id="s3_valor_x",
+        screen=26,
+    )
+    submit_final_value(
+        client,
+        current,
+        field_id="s3_valor_x",
+        field_type="objective_numeric",
+        literal_value="120",
+        validation_result=True,
+        activity_id="s3_valor_x",
+        screen=26,
+    )
+    completion = client.post(
+        f"/api/v2/sessions/{current['state']['session_id']}/complete",
+        headers=auth(current["session_token"]),
+        json={"completion_event_id": str(uuid.uuid4())},
+    )
+    login_admin(client)
+
+    detail = client.get(f"/admin/sessions/{current['state']['session_id']}")
+
+    assert detail.status_code == 200
+    assert "Recorrido completado" in detail.text
+    assert completion.json()["state"]["completed_at"][:19] in detail.text
+    assert "  Cuánto recibió Tadeo cada vez.  " in detail.text
+    assert detail.text.index("Intento 1") < detail.text.index("Intento 2")
+    assert detail.text.index("100") < detail.text.index("120")
+    assert "Validación automática: No aplica" in detail.text
+    assert "clasificación EOS" not in detail.text
+
+
+def test_current_csv_uses_current_catalog_without_historical_labels(client, participant_code):
+    current = start_current(client, participant_code)
+    submit_final_value(
+        client,
+        current,
+        field_id="s3_regalo_elegido",
+        field_type="narrative_choice",
+        literal_value="regalo-peluche",
+        screen=21,
+    )
+    login_admin(client)
+
+    response = client.get("/admin/applications/1/exports/responses-v2.csv")
+    rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+
+    assert response.status_code == 200
+    assert len(rows) == 1
+    assert rows[0]["experience_version"] == "tadeo-3situaciones-1"
+    assert rows[0]["field_id"] == "s3_regalo_elegido"
+    assert rows[0]["field_label"] == "Regalo elegido"
+    assert rows[0]["literal_value"] == "regalo-peluche"
+
+
 def test_field_catalog_and_version_filter_preserve_research_order():
     admin_script = (
         Path(__file__).parents[1] / "backend" / "static" / "admin.js"
@@ -105,6 +238,45 @@ def test_field_catalog_and_version_filter_preserve_research_order():
     assert FIELD_LABELS["s1_explora_a"] == "Tiempo total disponible"
     assert FIELD_LABELS["s4_procedimiento"] == "Procedimiento para resolver 4x − 180 = 300"
     assert FIELD_LABELS["s5_ecuacion_construida"] == "Ecuación construida para comparar las recetas"
+    assert THREE_SITUATIONS_FIELDS[1] == [
+        ("s1_tiempo_total", "Tiempo total disponible"),
+        ("s1_numero_actividades", "Número de actividades"),
+        ("s1_tiempo_por_actividad", "Tiempo por actividad"),
+        ("s1_igualdad_valor_1", "Primer valor de la igualdad"),
+        ("s1_igualdad_valor_2", "Segundo valor de la igualdad"),
+        ("s1_significado_izquierda", "Significado del miembro izquierdo"),
+        ("s1_significado_derecha", "Significado del miembro derecho"),
+        ("s1_misma_cantidad", "Ambos miembros representan la misma cantidad"),
+        ("s1_justificacion", "Justificación de la igualdad"),
+    ]
+    assert THREE_SITUATIONS_FIELDS[2] == [
+        ("s2_informacion_conocida", "Información conocida de la compra"),
+        ("s2_que_averiguar", "Cantidad que debe averiguar"),
+        ("s2_simbolo_elegido", "Símbolo elegido para la cantidad desconocida"),
+        ("s2_significado_simbolo", "Significado atribuido al símbolo"),
+        ("s2_representacion_cinco_cuadernos", "Representación de los cinco cuadernos"),
+        ("s2_signo_relacion", "Signo elegido para relacionar productos y total"),
+        ("s2_representacion_breve", "Representación abreviada de cinco cantidades iguales"),
+        ("s2_estrategia_resolucion", "Estrategia utilizada para encontrar x"),
+        ("s2_valor_x", "Valor encontrado para x"),
+        ("s2_cuaderno_elegido", "Cuaderno elegido"),
+        ("s2_comprobacion_igualdad", "Comprobación de igualdad"),
+    ]
+    assert THREE_SITUATIONS_FIELDS[3] == [
+        ("s3_regalo_elegido", "Regalo elegido"),
+        ("s3_informacion_faltante", "Información faltante en el registro"),
+        ("s3_que_averiguar", "Cantidad que debe averiguar"),
+        ("s3_representacion_cuatro_cantidades", "Representación de las cuatro cantidades iguales"),
+        ("s3_significado_4x_menos_180", "Significado de 4x - 180"),
+        ("s3_valor_lado_derecho", "Valor utilizado para completar la ecuación"),
+        ("s3_interpretacion_ecuacion", "Interpretación de 4x - 180 = 300"),
+        ("s3_estrategia_resolucion", "Estrategia utilizada para encontrar x"),
+        ("s3_valor_x", "Valor encontrado para x"),
+        ("s3_comprobacion_igualdad", "Comprobación de igualdad"),
+        ("s3_registro_completado", "Registro final de cantidades"),
+    ]
+    assert field_labels_for("tadeo-3situaciones-1")["s1_tiempo_total"] == "Tiempo total disponible"
+    assert "s1_explora_a" not in field_labels_for("tadeo-3situaciones-1")
     assert "row.dataset.version === selectedVersion" in admin_script
     assert "matchesCode && matchesStatus && matchesVersion" in admin_script
 

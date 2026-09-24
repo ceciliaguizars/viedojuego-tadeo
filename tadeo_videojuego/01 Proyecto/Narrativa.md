@@ -3,104 +3,80 @@ tags:
   - narrativa
   - tadeo
   - recorrido
-fuente: "Narrativa.pdf"
-paginas: 3
+version: tadeo-3situaciones-1
 ---
 
 # Narrativa
 
-[[Bienvenido|← Volver al inicio]] · [[../02 Situaciones/Situación 1 - Organizando el tiempo|Comenzar las situaciones →]]
+[[../Bienvenido|← Volver al inicio]] · [[../02 Situaciones/Situación 1 - Organizando el tiempo|Comenzar las situaciones →]]
 
 ## Premisa
 
-La historia gira en torno a Tadeo, un adolescente que comienza la tarde en su habitación. Su primera misión es consultar la agenda y revisar las cuatro actividades del día:
+Tadeo comienza la tarde en su habitación y consulta una agenda con dos actividades:
 
-- Alimentar a su perro.
-- Ir a la papelería por 5 cuadernos y una caja de colores para su hermana Eloísa.
+- Ir a la papelería a comprar 5 cuadernos y un paquete de colores.
 - Comprar un regalo para Eloísa.
-- Ayudar a sus padres con la cena.
 
-Tadeo revisa su reloj y descubre que dispone de **120 minutos**. Decide repartir el tiempo de manera equitativa, lo que abre la primera situación matemática.
+Dispone de **60 minutos** y quiere dedicar el mismo tiempo a cada actividad.
 
-## Secuencia narrativa completa
+## Secuencia activa
 
-### 1. Presentación e inicio
+### 1. Organizando el tiempo
 
-- Presentación de Tadeo y contexto del día.
-- Aparición de la agenda.
-- Tadeo dispone de 120 minutos.
-- Organización inicial de su tiempo.
+Tadeo distribuye 60 minutos entre dos actividades. La igualdad aprobada es:
 
-### 2. Organizando el tiempo
+$$
+30+30=60
+$$
 
-Tadeo distribuye sus 120 minutos entre cuatro actividades, determina que corresponden **30 minutos a cada una** y establece su plan para el día.
+Resultado: **30 minutos por actividad**.
 
-Modelo previsto: $Ax=B$.
+### 2. En la papelería
 
-### 3. Alimentando a su perro
+Tadeo compra 5 cuadernos iguales y un paquete de colores. Los colores cuestan **$50** y la compra completa cuesta **$250**. Representa el precio desconocido, construye y comprueba:
 
-Tadeo consulta la agenda y se dirige al patio. Corrobora que debe servir **300 g** de alimento diarios. Solo queda una bolsa de **900 g**, por lo que necesita calcular cuántos días durará y programar la compra de una nueva bolsa antes de que se termine.
+$$
+5x+50=250
+$$
 
-Resultado narrativo: la bolsa dura **3 días** y la compra se agenda para el **día 2**.
+Resultado: **$40 por cuaderno**.
 
-Modelo previsto: $Ax=B$.
+### 3. Registrando su dinero
 
-### 4. En la papelería
+Tadeo elige un regalo de **$180**. Antes había recibido cuatro cantidades iguales y, después de la compra, conserva **$300**. Representa, resuelve y comprueba:
 
-Tadeo necesita comprar 5 cuadernos iguales y una caja de 20 colores. Tiene **$195**. La caja cuesta **$45** y hay cuadernos de **$30, $35 y $40**. Debe decidir cuál opción permite gastar exactamente el dinero disponible.
+$$
+4x-180=300
+$$
 
-Resultado narrativo: compra los cuadernos de **$30**.
+Resultado: **$120 en cada ocasión**.
 
-Modelo previsto: $Ax+B=C$.
+### 4. Agenda completada y cierre
 
-### 5. Registrando sus gastos
+La agenda muestra exactamente las dos actividades terminadas y Tadeo dice:
 
-Tadeo compra un regalo para Eloísa por **$180**. Puede elegir entre varios regalos con el mismo precio. Al volver a casa descubre que olvidó registrar cuatro ingresos iguales. Después de la compra conserva **$300** y calcula cuánto recibió en cada ocasión.
+> “¡Listo! Ya terminé todas mis actividades de hoy.”
 
-Resultado narrativo: cada ingreso fue de **$120**.
+El cierre muestra “DÍA COMPLETADO”, distintivos de Papelería y Regalo, y un indicador de **recorrido completado**. No se muestran puntuaciones, exactitud ni calidad de respuestas.
 
-Modelo previsto: $Ax-B=C$.
+### 5. Finalización
 
-### 6. Ayudando con la cena
+La última pantalla confirma:
 
-Su mamá le muestra una receta original y otra modificada. Tadeo quiere saber para cuántas personas ambas utilizan la misma cantidad de carne. Determina que esto ocurre para **4 porciones**, con **700 g** en cada receta. Puede elegir cualquiera de las dos y ayudar a preparar la cena.
+> “¡Terminaste el recorrido de Tadeo! Tus respuestas han sido registradas.”
 
-Modelo previsto: $Ax+B=Cx+D$.
+La sesión se completa solamente después de sincronizar los envíos pendientes.
 
-### 7. Cierre
+## Pantallas
 
-Tadeo consulta por última vez su agenda. Todas las actividades aparecen completadas. Cena con su familia, guarda la agenda y se prepara para dormir.
+| Segmento | Rango |
+|---|---:|
+| Inicio, folio, presentación y agenda inicial | 1–4 |
+| Situación 1 | 5–10 |
+| Situación 2 | 11–20 |
+| Situación 3 | 21–28 |
+| Agenda completada | 29 |
+| Cierre interactivo | 30 |
+| Finalización | 31 |
 
-**Pantalla final:** “Día completado”.
-
-## Agenda y estados
-
-| Momento | Perro | Papelería | Regalo | Cena |
-|---|---:|---:|---:|---:|
-| Inicio | Pendiente | Pendiente | Pendiente | Pendiente |
-| Tras situación 2 | ✓ | Pendiente | Pendiente | Pendiente |
-| Tras situación 3 | ✓ | ✓ | Pendiente | Pendiente |
-| Tras situación 4 | ✓ | ✓ | ✓ | Pendiente |
-| Cierre | ✓ | ✓ | ✓ | ✓ |
-
-## Ritmo didáctico en la interfaz
-
-La narrativa se desarrolla mediante **21 etapas de preguntas** distribuidas entre las cinco situaciones. Cada escena permanece visible mientras el jugador avanza por las preguntas que le corresponden.
-
-| Situación | Preguntas | Cierre narrativo |
-|---|---:|---|
-| Organizando el tiempo | 3 | Se establecen bloques de 30 minutos |
-| Alimentando a su perro | 4 | Se completa la primera tarea y se agenda la compra futura |
-| En la papelería | 4 | Se completa la segunda tarea |
-| Registrando sus gastos | 5 | Se completa la tercera tarea |
-| Ayudando con la cena | 5 | Se completa la cuarta tarea y termina el día |
-
-La historia no avanza con una respuesta parcial: primero se recorren las etapas de comprensión, representación y comprobación de la situación. Solo entonces se actualizan la agenda, el tiempo ficticio y el descubrimiento correspondiente.
-
-## Enlaces
-
-- [[../02 Situaciones/Situación 1 - Organizando el tiempo]]
-- [[../02 Situaciones/Situación 2 - Alimentando a su mascota]]
-- [[../02 Situaciones/Situación 3 - En la papelería]]
-- [[../02 Situaciones/Situación 4 - Registrando sus gastos]]
-- [[../02 Situaciones/Situación 5 - Ayudando con la cena]]
+La situación de mascota y la receta pertenecen a versiones anteriores y no forman parte de esta trayectoria.

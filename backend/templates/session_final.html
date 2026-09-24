@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ game_session.participant_code.code }} · Tadeo final{% endblock %}
+{% block title %}{{ game_session.participant_code.code }} · {{ research.summary.version_label }}{% endblock %}
 {% block content %}
   <nav class="breadcrumbs" aria-label="Migas de pan">
     <a href="/admin">Mis grupos</a><span aria-hidden="true">/</span><a href="/admin/applications/{{ game_session.participant_code.application_id }}">{{ game_session.participant_code.application.name }}</a><span aria-hidden="true">/</span><span aria-current="page">{{ game_session.participant_code.code }}</span>
@@ -7,7 +7,7 @@
 
   <div class="page-heading research-heading">
     <div>
-      <p class="kicker">Detalle de investigación · <span class="version-label final">Tadeo final</span></p>
+      <p class="kicker">Detalle de investigación · <span class="version-label final">{{ research.summary.version_label }}</span></p>
       <h1>Folio {{ game_session.participant_code.code }}</h1>
       <p class="page-lead">Respuestas literales y trayectoria de la sesión, sin calificación ni interpretación automática.</p>
     </div>
@@ -17,7 +17,7 @@
   <section class="stat-grid research-session-stats" aria-label="Resumen de la sesión">
     <article class="stat panel"><span>Grupo</span><strong class="small-value">{{ game_session.participant_code.application.name }}</strong></article>
     <article class="stat panel"><span>Session ID</span><strong class="technical-id">{{ game_session.id }}</strong></article>
-    <article class="stat panel"><span>Progreso</span><strong class="small-value">Pantalla {{ research.summary.current_screen }} de 55</strong><small>{{ 'Recorrido completado' if research.summary.completed else 'Recorrido en progreso' }}</small></article>
+    <article class="stat panel"><span>Progreso</span><strong class="small-value">Pantalla {{ research.summary.current_screen }} de {{ research.summary.total_screens }}</strong><small>{{ 'Recorrido completado' if research.summary.completed else 'Recorrido en progreso' }}</small></article>
     <article class="stat panel"><span>Respuestas registradas</span><strong>{{ research.summary.response_count }}</strong></article>
     <article class="stat panel"><span>Duración total</span><strong>{{ research.summary.duration_seconds|duration }}</strong><small>inicio a {{ 'finalización' if game_session.completed_at else 'consulta' }}</small></article>
     <article class="stat panel"><span>Tiempo activo registrado</span><strong>{{ research.summary.active_seconds|duration }}</strong><small>No equivale necesariamente a duración total</small></article>
@@ -25,20 +25,20 @@
 
   <section class="panel session-timestamps" aria-label="Fechas de la sesión">
     <dl>
-      <div><dt>Versión</dt><dd>tadeo-final-1</dd></div>
+      <div><dt>Versión</dt><dd>{{ game_session.experience_version }}</dd></div>
       <div><dt>Inicio</dt><dd>{{ game_session.started_at.isoformat() }}</dd></div>
       <div><dt>Finalización</dt><dd>{{ game_session.completed_at.isoformat() if game_session.completed_at else 'Sin finalización registrada' }}</dd></div>
     </dl>
   </section>
 
   <nav class="section-nav research-situation-nav" aria-label="Situaciones de la sesión">
-    {% for situation in research.situations %}<a href="#situacion-{{ situation.number }}">Situación {{ situation.number }} <span>{{ situation.responded_fields }}/{{ situation.total_fields }}</span></a>{% endfor %}
+    {% for situation in research.situations %}<a href="#situacion-{{ situation.number }}">{{ situation.title }} <span>{{ situation.responded_fields }}/{{ situation.total_fields }}</span></a>{% endfor %}
   </nav>
 
   {% for situation in research.situations %}
     <section class="panel research-situation" id="situacion-{{ situation.number }}">
       <div class="research-situation-heading">
-        <div><p class="kicker">Trayectoria didáctica</p><h2>Situación {{ situation.number }}</h2></div>
+        <div><p class="kicker">Trayectoria didáctica</p><h2>{{ situation.title }}</h2></div>
         <dl class="situation-summary">
           <div><dt>Campos respondidos</dt><dd>{{ situation.responded_fields }}/{{ situation.total_fields }}</dd></div>
           <div><dt>Intentos adicionales</dt><dd>{{ situation.additional_attempts }}</dd></div>

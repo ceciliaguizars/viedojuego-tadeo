@@ -29,10 +29,13 @@ from .models import (
 )
 from .rag import RagError, RagService, rag_status
 from .research import (
+    HISTORICAL_FINAL_EXPERIENCE_VERSION,
+    THREE_SITUATIONS_EXPERIENCE_VERSION,
     final_application_summary,
     final_response_csv_rows,
     final_session_detail,
     final_session_summary,
+    is_research_experience,
     version_label,
 )
 from .schemas import (
@@ -70,7 +73,7 @@ from .services import (
 from .validators import STEP_COUNTS, validate_question
 
 
-FINAL_EXPERIENCE_VERSION = "tadeo-final-1"
+CURRENT_EXPERIENCE_VERSION = THREE_SITUATIONS_EXPERIENCE_VERSION
 FINAL_FIELD_TYPES = {
     "open_text",
     "math_expression",
@@ -78,12 +81,25 @@ FINAL_FIELD_TYPES = {
     "objective_choice",
     "narrative_choice",
 }
-FINAL_SITUATION_SCREENS = {
-    1: range(5, 12),
-    2: range(12, 21),
-    3: range(21, 31),
-    4: range(31, 42),
-    5: range(42, 54),
+EXPERIENCE_FLOWS = {
+    HISTORICAL_FINAL_EXPERIENCE_VERSION: {
+        "total_screens": 55,
+        "situation_screens": {
+            1: range(5, 12),
+            2: range(12, 21),
+            3: range(21, 31),
+            4: range(31, 42),
+            5: range(42, 54),
+        },
+    },
+    THREE_SITUATIONS_EXPERIENCE_VERSION: {
+        "total_screens": 31,
+        "situation_screens": {
+            1: range(5, 11),
+            2: range(11, 21),
+            3: range(21, 29),
+        },
+    },
 }
 
 
@@ -191,7 +207,7 @@ def _authorized_v2_session(
     authorization: str | None,
 ) -> GameSession:
     game_session = _authorized_game_session(database, session_id, authorization)
-    if game_session.experience_version != FINAL_EXPERIENCE_VERSION:
+    if not is_research_experience(game_session.experience_version):
         raise HTTPException(status_code=409, detail="La sesión no pertenece a la experiencia definitiva")
     return game_session
 
@@ -207,7 +223,7 @@ def _authorized_v2_session_for_update(
     )
     if not game_session or not verify_session_access(game_session, token):
         raise HTTPException(status_code=401, detail="Sesión no autorizada")
-    if game_session.experience_version != FINAL_EXPERIENCE_VERSION:
+    if not is_research_experience(game_session.experience_version):
         raise HTTPException(status_code=409, detail="La sesión no pertenece a la experiencia definitiva")
     return game_session
 
@@ -387,7 +403,7 @@ def start_v2_session(
         participant_code,
         payload.resume_session_id,
         payload.resume_token,
-        experience_version=FINAL_EXPERIENCE_VERSION,
+        experience_version=CURRENT_EXPERIENCE_VERSION,
         force_new=payload.force_new,
     )
     refreshed = load_session(database, game_session.id) or game_session
@@ -421,6 +437,10 @@ def update_v2_progress(
     if payload.progress_revision <= game_session.progress_revision:
         return {"applied": False, "stale": True, "state": _v2_state_payload(game_session, False)}
 
+    flow = EXPERIENCE_FLOWS[game_session.experience_version]
+    if payload.current_screen > flow["total_screens"]:
+        raise HTTPException(status_code=422, detail="La pantalla no corresponde a la versión")
+
     game_session.current_screen = payload.current_screen
     game_session.progress_revision = payload.progress_revision
     game_session.progress_snapshot = payload.progress_snapshot
@@ -445,7 +465,8 @@ def submit_v2_response(
         return {"duplicate": True, "submission": _response_payload(duplicate)}
     if game_session.completed_at is not None:
         raise HTTPException(status_code=409, detail="La sesión ya fue finalizada")
-    if payload.screen not in FINAL_SITUATION_SCREENS[payload.situation]:
+    situation_screens = EXPERIENCE_FLOWS[game_session.experience_version]["situation_screens"]
+    if payload.situation not in situation_screens or payload.screen not in situation_screens[payload.situation]:
         raise HTTPException(status_code=422, detail="La pantalla no corresponde a la situación")
 
     field_ids = [value.field_id for value in payload.values]
@@ -483,6 +504,12 @@ def submit_v2_response(
         if payload.validation_result is not None
         else None
     )
+    if (
+        game_session.experience_version == THREE_SITUATIONS_EXPERIENCE_VERSION
+        and attempt_number is not None
+        and attempt_number > 2
+    ):
+        raise HTTPException(status_code=409, detail="La actividad permite un máximo de dos intentos")
     submission = ResponseSubmission(
         game_session_id=session_id,
         event_id=payload.event_id,
@@ -754,7 +781,21 @@ def application_detail(
     mark_stale_sessions(database)
     application, sessions = _load_application_detail(database, application_id)
     legacy_sessions = [item for item in sessions if item.experience_version == "legacy-1"]
-    final_sessions = [item for item in sessions if item.experience_version == FINAL_EXPERIENCE_VERSION]
+    final_sessions = [item for item in sessions if is_research_experience(item.experience_version)]
+    research_summaries = [
+        {
+            "version": experience_version,
+            "label": version_label(experience_version),
+            "summary": final_application_summary(
+                [item for item in final_sessions if item.experience_version == experience_version]
+            ),
+        }
+        for experience_version in (
+            THREE_SITUATIONS_EXPERIENCE_VERSION,
+            HISTORICAL_FINAL_EXPERIENCE_VERSION,
+        )
+        if any(item.experience_version == experience_version for item in final_sessions)
+    ]
     codes = database.scalars(
         select(ParticipantCode)
         .where(ParticipantCode.application_id == application_id)
@@ -763,11 +804,11 @@ def application_detail(
     session_rows = [
         {
             "session": item,
-            "is_final": item.experience_version == FINAL_EXPERIENCE_VERSION,
+            "is_final": is_research_experience(item.experience_version),
             "version_label": version_label(item.experience_version),
             "metrics": session_metrics(item) if item.experience_version == "legacy-1" else None,
             "research": final_session_summary(item)
-            if item.experience_version == FINAL_EXPERIENCE_VERSION else None,
+            if is_research_experience(item.experience_version) else None,
         }
         for item in sessions
     ]
@@ -784,7 +825,7 @@ def application_detail(
             used_codes=used_codes,
             session_rows=session_rows,
             summary=application_summary(legacy_sessions),
-            final_summary=final_application_summary(final_sessions),
+            research_summaries=research_summaries,
             has_legacy=bool(legacy_sessions),
             has_final=bool(final_sessions),
             difficulty=difficulty_by_scene(legacy_sessions),
@@ -841,7 +882,7 @@ def admin_session_detail(
     game_session = load_session(database, session_id)
     if not game_session:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
-    if game_session.experience_version == FINAL_EXPERIENCE_VERSION:
+    if is_research_experience(game_session.experience_version):
         return templates.TemplateResponse(
             request=request,
             name="session_final.html",
@@ -982,7 +1023,7 @@ def export_final_responses(
     require_admin(request)
     application, sessions = _load_application_detail(database, application_id)
     final_sessions = [
-        item for item in sessions if item.experience_version == FINAL_EXPERIENCE_VERSION
+        item for item in sessions if is_research_experience(item.experience_version)
     ]
     rows = final_response_csv_rows(application.name, final_sessions)
     return _csv_response(rows, f"{application.id}-respuestas-tadeo-final.csv")

@@ -7,7 +7,8 @@ from .metrics import elapsed_seconds
 from .models import GameSession, ResponseSubmission, ResponseValue
 
 
-FINAL_EXPERIENCE_VERSION = "tadeo-final-1"
+HISTORICAL_FINAL_EXPERIENCE_VERSION = "tadeo-final-1"
+THREE_SITUATIONS_EXPERIENCE_VERSION = "tadeo-3situaciones-1"
 NON_EVALUATED_FIELD_TYPES = {"open_text", "math_expression", "narrative_choice"}
 
 FINAL_FIELDS: dict[int, list[tuple[str, str]]] = {
@@ -99,15 +100,96 @@ FIELD_LABELS = {
     for field_id, label in fields
 }
 
+THREE_SITUATIONS_FIELDS: dict[int, list[tuple[str, str]]] = {
+    1: [
+        ("s1_tiempo_total", "Tiempo total disponible"),
+        ("s1_numero_actividades", "Número de actividades"),
+        ("s1_tiempo_por_actividad", "Tiempo por actividad"),
+        ("s1_igualdad_valor_1", "Primer valor de la igualdad"),
+        ("s1_igualdad_valor_2", "Segundo valor de la igualdad"),
+        ("s1_significado_izquierda", "Significado del miembro izquierdo"),
+        ("s1_significado_derecha", "Significado del miembro derecho"),
+        ("s1_misma_cantidad", "Ambos miembros representan la misma cantidad"),
+        ("s1_justificacion", "Justificación de la igualdad"),
+    ],
+    2: [
+        ("s2_informacion_conocida", "Información conocida de la compra"),
+        ("s2_que_averiguar", "Cantidad que debe averiguar"),
+        ("s2_simbolo_elegido", "Símbolo elegido para la cantidad desconocida"),
+        ("s2_significado_simbolo", "Significado atribuido al símbolo"),
+        ("s2_representacion_cinco_cuadernos", "Representación de los cinco cuadernos"),
+        ("s2_signo_relacion", "Signo elegido para relacionar productos y total"),
+        ("s2_representacion_breve", "Representación abreviada de cinco cantidades iguales"),
+        ("s2_estrategia_resolucion", "Estrategia utilizada para encontrar x"),
+        ("s2_valor_x", "Valor encontrado para x"),
+        ("s2_cuaderno_elegido", "Cuaderno elegido"),
+        ("s2_comprobacion_igualdad", "Comprobación de igualdad"),
+    ],
+    3: [
+        ("s3_regalo_elegido", "Regalo elegido"),
+        ("s3_informacion_faltante", "Información faltante en el registro"),
+        ("s3_que_averiguar", "Cantidad que debe averiguar"),
+        ("s3_representacion_cuatro_cantidades", "Representación de las cuatro cantidades iguales"),
+        ("s3_significado_4x_menos_180", "Significado de 4x - 180"),
+        ("s3_valor_lado_derecho", "Valor utilizado para completar la ecuación"),
+        ("s3_interpretacion_ecuacion", "Interpretación de 4x - 180 = 300"),
+        ("s3_estrategia_resolucion", "Estrategia utilizada para encontrar x"),
+        ("s3_valor_x", "Valor encontrado para x"),
+        ("s3_comprobacion_igualdad", "Comprobación de igualdad"),
+        ("s3_registro_completado", "Registro final de cantidades"),
+    ],
+}
+
+RESEARCH_EXPERIENCES: dict[str, dict[str, Any]] = {
+    HISTORICAL_FINAL_EXPERIENCE_VERSION: {
+        "label": "Tadeo final",
+        "total_screens": 55,
+        "fields": FINAL_FIELDS,
+    },
+    THREE_SITUATIONS_EXPERIENCE_VERSION: {
+        "label": "Tadeo · 3 situaciones",
+        "total_screens": 31,
+        "fields": THREE_SITUATIONS_FIELDS,
+        "situation_titles": {
+            1: "Situación 1. Organizando el tiempo",
+            2: "Situación 2. En la papelería",
+            3: "Situación 3. Registrando su dinero",
+        },
+    },
+}
+
+
+def is_research_experience(experience_version: str) -> bool:
+    return experience_version in RESEARCH_EXPERIENCES
+
+
+def experience_total_screens(experience_version: str) -> int:
+    config = RESEARCH_EXPERIENCES.get(experience_version)
+    return int(config["total_screens"]) if config else 55
+
+
+def experience_fields(experience_version: str) -> dict[int, list[tuple[str, str]]]:
+    config = RESEARCH_EXPERIENCES.get(experience_version)
+    return config["fields"] if config else {}
+
+
+def field_labels_for(experience_version: str) -> dict[str, str]:
+    return {
+        field_id: label
+        for fields in experience_fields(experience_version).values()
+        for field_id, label in fields
+    }
+
 
 def version_label(experience_version: str) -> str:
-    return "Tadeo final" if experience_version == FINAL_EXPERIENCE_VERSION else experience_version
+    config = RESEARCH_EXPERIENCES.get(experience_version)
+    return str(config["label"]) if config else experience_version
 
 
 def status_label(status: str) -> str:
     return {
         "in_progress": "En progreso",
-        "completed": "Completada",
+        "completed": "Recorrido completado",
         "abandoned": "Abandonada",
     }.get(status, status)
 
@@ -117,13 +199,15 @@ def response_count(game_session: GameSession) -> int:
 
 
 def final_session_summary(game_session: GameSession) -> dict[str, Any]:
+    total_screens = experience_total_screens(game_session.experience_version)
     return {
         "version_label": version_label(game_session.experience_version),
         "status_label": status_label(game_session.status),
         "response_count": response_count(game_session),
         "duration_seconds": round(elapsed_seconds(game_session), 2),
         "active_seconds": round(game_session.active_seconds, 2),
-        "current_screen": min(55, max(1, game_session.current_screen)),
+        "current_screen": min(total_screens, max(1, game_session.current_screen)),
+        "total_screens": total_screens,
         "completed": game_session.status == "completed",
     }
 
@@ -180,7 +264,7 @@ def final_session_detail(game_session: GameSession) -> dict[str, Any]:
             values_by_field[value.field_id].append(_response_entry(submission, value))
 
     situations = []
-    for situation, catalog in FINAL_FIELDS.items():
+    for situation, catalog in experience_fields(game_session.experience_version).items():
         fields = []
         additional_attempts = 0
         for field_id, label in catalog:
@@ -191,6 +275,9 @@ def final_session_detail(game_session: GameSession) -> dict[str, Any]:
             fields.append({"field_id": field_id, "label": label, "responses": responses})
         situations.append({
             "number": situation,
+            "title": RESEARCH_EXPERIENCES[game_session.experience_version]
+            .get("situation_titles", {})
+            .get(situation, f"Situación {situation}"),
             "fields": fields,
             "responded_fields": sum(1 for field in fields if field["responses"]),
             "total_fields": len(fields),
@@ -226,6 +313,7 @@ FINAL_RESPONSE_CSV_COLUMNS = [
 def final_response_csv_rows(application_name: str, sessions: list[GameSession]) -> list[list[object]]:
     rows: list[list[object]] = [FINAL_RESPONSE_CSV_COLUMNS]
     for game_session in sessions:
+        field_labels = field_labels_for(game_session.experience_version)
         submissions = sorted(
             game_session.response_submissions,
             key=lambda item: (item.submitted_at, item.id),
@@ -245,7 +333,7 @@ def final_response_csv_rows(application_name: str, sessions: list[GameSession]) 
                     game_session.completed_at.isoformat() if game_session.completed_at else "",
                     game_session.current_screen,
                     value.field_id,
-                    FIELD_LABELS.get(value.field_id, value.field_id),
+                    field_labels.get(value.field_id, value.field_id),
                     submission.situation,
                     submission.screen,
                     submission.activity_id,

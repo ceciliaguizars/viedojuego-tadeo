@@ -1,27 +1,63 @@
 const LEGACY_SESSION_STORAGE_KEY = "tadeo-research-session-v1";
 const PENDING_ATTEMPT_KEY = "tadeo-pending-attempt-v1";
 const ACTIVITY_QUEUE_KEY = "tadeo-activity-queue-v1";
-const SESSION_STORAGE_KEY = "tadeo-final-session-v2";
-const OUTBOX_STORAGE_KEY = "tadeo-final-outbox-v2";
-const EXPERIENCE_VERSION = "tadeo-final-1";
+const SESSION_STORAGE_KEY = "tadeo-3situaciones-session-v1";
+const OUTBOX_STORAGE_KEY = "tadeo-3situaciones-outbox-v1";
+const FLOW_PROGRESS_KEY = "tadeo-3situaciones-progress-v1";
+const EXPERIENCE_VERSION = "tadeo-3situaciones-1";
 const SITUATION_ONE_PROGRESS_KEY = "tadeo-situation-one-progress-v1";
 const SITUATION_TWO_PROGRESS_KEY = "tadeo-situation-two-progress-v1";
 const SITUATION_THREE_PROGRESS_KEY = "tadeo-situation-three-progress-v1";
 const SITUATION_FOUR_PROGRESS_KEY = "tadeo-situation-four-progress-v1";
 const SITUATION_FIVE_PROGRESS_KEY = "tadeo-situation-five-progress-v1";
 
+const EXPERIENCE_ROUTE = Object.freeze({
+  version: EXPERIENCE_VERSION,
+  introScreens: Object.freeze({
+    home: 1,
+    folio: 2,
+    presentation: 3,
+    initialAgenda: 4,
+  }),
+  situations: Object.freeze([
+    Object.freeze({ id: 1, key: "organizando-tiempo", title: "Organizando el tiempo", screenCount: 6, activityIndex: null }),
+    Object.freeze({ id: 2, key: "papeleria", title: "En la papelería", screenCount: 10, activityIndex: 0 }),
+    Object.freeze({ id: 3, key: "dinero", title: "Registrando su dinero", screenCount: 8, activityIndex: 1 }),
+  ]),
+  closingScreens: Object.freeze(["completedAgenda", "closing", "finalization"]),
+});
+
+const buildExperienceFlow = (route) => {
+  let nextScreen = route.introScreens.initialAgenda + 1;
+  const situations = route.situations.map((situation) => {
+    const startScreen = nextScreen;
+    const endScreen = startScreen + situation.screenCount - 1;
+    nextScreen = endScreen + 1;
+    return Object.freeze({ ...situation, startScreen, endScreen });
+  });
+  const screens = { ...route.introScreens };
+  route.closingScreens.forEach((name) => {
+    screens[name] = nextScreen;
+    nextScreen += 1;
+  });
+  return Object.freeze({
+    version: route.version,
+    totalScreens: nextScreen - 1,
+    screens: Object.freeze(screens),
+    situations: Object.freeze(situations),
+  });
+};
+
+const EXPERIENCE_FLOW = buildExperienceFlow(EXPERIENCE_ROUTE);
+
 const agendaItems = [
-  "Alimentar a su perro.",
-  "Ir a la papelería.",
+  "Ir a la papelería a comprar 5 cuadernos y un paquete de colores.",
   "Comprar un regalo para Eloísa.",
-  "Ayudar con la cena.",
 ];
 
 const initialAgendaIcons = [
-  "./assets/objects/icono_comida_perro.png",
   "./assets/objects/icono_papeleria.png",
   "./assets/objects/icono_regalo.png",
-  "./assets/objects/icono_cena.png",
 ];
 
 const discoveries = [
@@ -659,20 +695,59 @@ const discoveriesDialog = document.querySelector("#discoveries-dialog");
 const agendaList = document.querySelector("#agenda-list");
 const discoveriesList = document.querySelector("#discoveries-list");
 const toast = document.querySelector("#toast");
-const situationOneReviewRequested = new URLSearchParams(window.location.search).get("situacion") === "1";
-const situationThreeReviewRequested = new URLSearchParams(window.location.search).get("situacion") === "3";
-const situationFourReviewRequested = new URLSearchParams(window.location.search).get("situacion") === "4";
-const situationFiveReviewRequested = new URLSearchParams(window.location.search).get("situacion") === "5";
-const reviewSituation = situationOneReviewRequested
-  ? 1
-  : situationThreeReviewRequested ? 3 : situationFourReviewRequested ? 4 : situationFiveReviewRequested ? 5 : null;
+const requestedSituation = Number(new URLSearchParams(window.location.search).get("situacion"));
+const reviewSituation = EXPERIENCE_FLOW.situations.some(({ id }) => id === requestedSituation)
+  ? requestedSituation
+  : null;
 const isReviewMode = reviewSituation !== null;
+// Archivo de compatibilidad: los renderizadores y handlers históricos que aparecen
+// más adelante permanecen acoplados a `tadeo-final-1`. El render activo nunca los
+// invoca, pero se conservan para no destruir la reproducción/auditoría histórica.
+// Ninguna revisión nueva debe entrar en esas trayectorias.
+const situationOneReviewRequested = false;
+const situationThreeReviewRequested = false;
+const situationFourReviewRequested = false;
+const situationFiveReviewRequested = false;
 
 const defaultState = { currentScene: 0, currentStep: 0, completedScenes: [], unlocked: [], metrics: null };
 let state = { ...defaultState };
 let researchSession = loadJson(SESSION_STORAGE_KEY, null);
 let introPhase = researchSession?.introPhase || (researchSession ? "game" : "home");
 let outbox = loadJson(OUTBOX_STORAGE_KEY, []);
+const createDefaultFlowProgress = () => ({
+  currentScreen: EXPERIENCE_FLOW.situations[0].startScreen,
+  completedSituations: [],
+  completedActivities: [],
+  situationData: {
+    1: {
+      answers: {},
+      objectiveAttempts: {},
+      savedOpenStages: [],
+    },
+    2: {
+      answers: {},
+      objectiveAttempts: {},
+      savedOpenStages: [],
+      notebooksAssigned: false,
+      colorsAdded: false,
+      strategySaved: false,
+      activityCompleted: false,
+    },
+    3: {
+      answers: {},
+      objectiveAttempts: {},
+      savedOpenStages: [],
+      giftPurchased: false,
+      quantitiesBuilt: false,
+      expenseAdded: false,
+      equationCompleted: false,
+      strategySaved: false,
+      registerCompleted: false,
+    },
+  },
+});
+const defaultFlowProgress = createDefaultFlowProgress();
+let flowProgress = createDefaultFlowProgress();
 let situationOneProgress = { stage: 0, answers: {} };
 let hasSituationOneProgress = false;
 let situationTwoProgress = { stage: 0, answers: {} };
@@ -683,7 +758,7 @@ let hasSituationFourProgress = false;
 let situationFiveProgress = { stage: 0, answers: {}, objectiveAttempts: {}, selectedRecipe: "" };
 let hasSituationFiveProgress = false;
 const defaultFinalFlow = {
-  screen: 53,
+  screen: EXPERIENCE_FLOW.situations.at(-1).endScreen,
   completionEventId: null,
   completionStatus: "idle",
   completionError: "",
@@ -707,6 +782,75 @@ function loadJson(key, fallback) {
     return fallback;
   }
 }
+
+const loadFlowProgress = () => {
+  const allProgress = loadJson(FLOW_PROGRESS_KEY, {});
+  const saved = researchSession?.id ? allProgress[researchSession.id] : null;
+  const savedSituationOne = saved?.situationData?.[1];
+  const savedSituationTwo = saved?.situationData?.[2];
+  const savedSituationThree = saved?.situationData?.[3];
+  flowProgress = {
+    currentScreen: Math.min(
+      EXPERIENCE_FLOW.totalScreens,
+      Math.max(EXPERIENCE_FLOW.situations[0].startScreen, Number(saved?.currentScreen) || defaultFlowProgress.currentScreen),
+    ),
+    completedSituations: Array.isArray(saved?.completedSituations) ? saved.completedSituations : [],
+    completedActivities: Array.isArray(saved?.completedActivities) ? saved.completedActivities : [],
+    situationData: {
+      1: {
+        answers: savedSituationOne?.answers && typeof savedSituationOne.answers === "object"
+          ? savedSituationOne.answers
+          : {},
+        objectiveAttempts: savedSituationOne?.objectiveAttempts && typeof savedSituationOne.objectiveAttempts === "object"
+          ? savedSituationOne.objectiveAttempts
+          : {},
+        savedOpenStages: Array.isArray(savedSituationOne?.savedOpenStages)
+          ? savedSituationOne.savedOpenStages
+          : [],
+      },
+      2: {
+        answers: savedSituationTwo?.answers && typeof savedSituationTwo.answers === "object"
+          ? savedSituationTwo.answers
+          : {},
+        objectiveAttempts: savedSituationTwo?.objectiveAttempts && typeof savedSituationTwo.objectiveAttempts === "object"
+          ? savedSituationTwo.objectiveAttempts
+          : {},
+        savedOpenStages: Array.isArray(savedSituationTwo?.savedOpenStages)
+          ? savedSituationTwo.savedOpenStages
+          : [],
+        notebooksAssigned: Boolean(savedSituationTwo?.notebooksAssigned),
+        colorsAdded: Boolean(savedSituationTwo?.colorsAdded),
+        strategySaved: Boolean(savedSituationTwo?.strategySaved),
+        activityCompleted: Boolean(savedSituationTwo?.activityCompleted),
+      },
+      3: {
+        answers: savedSituationThree?.answers && typeof savedSituationThree.answers === "object"
+          ? savedSituationThree.answers
+          : {},
+        objectiveAttempts: savedSituationThree?.objectiveAttempts && typeof savedSituationThree.objectiveAttempts === "object"
+          ? savedSituationThree.objectiveAttempts
+          : {},
+        savedOpenStages: Array.isArray(savedSituationThree?.savedOpenStages)
+          ? savedSituationThree.savedOpenStages
+          : [],
+        giftPurchased: Boolean(savedSituationThree?.giftPurchased),
+        quantitiesBuilt: Boolean(savedSituationThree?.quantitiesBuilt),
+        expenseAdded: Boolean(savedSituationThree?.expenseAdded),
+        equationCompleted: Boolean(savedSituationThree?.equationCompleted),
+        strategySaved: Boolean(savedSituationThree?.strategySaved),
+        registerCompleted: Boolean(savedSituationThree?.registerCompleted),
+      },
+    },
+  };
+};
+
+const saveFlowProgress = () => {
+  if (!researchSession?.id || isReviewMode) return;
+  const allProgress = loadJson(FLOW_PROGRESS_KEY, {});
+  allProgress[researchSession.id] = flowProgress;
+  localStorage.setItem(FLOW_PROGRESS_KEY, JSON.stringify(allProgress));
+  queueProgressSnapshot();
+};
 
 const saveResearchSession = () => {
   if (!researchSession || isReviewMode) return;
@@ -882,53 +1026,47 @@ const setIntroPhase = (phase) => {
   if (researchSession) {
     researchSession.introPhase = phase;
     if (phase === "game") {
-      const resumedScene = sceneForScreen(currentScreenForProgress());
-      state.currentScene = resumedScene;
-      state.completedScenes = Array.from({ length: Math.min(resumedScene, 5) }, (_, index) => index);
-      state.unlocked = [...state.completedScenes];
+      const resumedSituation = situationForScreen(currentScreenForProgress());
+      state.currentScene = resumedSituation ? resumedSituation.id - 1 : 0;
+      state.completedScenes = [...flowProgress.completedSituations];
+      state.unlocked = [...flowProgress.completedSituations];
     }
     saveResearchSession();
     queueProgressSnapshot();
   }
 };
 
-const sceneForScreen = (screen) => {
-  if (screen >= 54) return 5;
-  if (screen >= 42) return 4;
-  if (screen >= 31) return 3;
-  if (screen >= 21) return 2;
-  if (screen >= 12) return 1;
-  return 0;
-};
+const situationForScreen = (screen) => EXPERIENCE_FLOW.situations.find(
+  ({ startScreen, endScreen }) => screen >= startScreen && screen <= endScreen,
+) || null;
 
 const applyServerState = (serverState) => {
   if (serverState.experience_version === EXPERIENCE_VERSION) {
     const currentScreen = Number(serverState.current_screen) || 1;
-    if (!isReviewMode && currentScreen >= 54) {
-      finalFlow.screen = Math.min(55, currentScreen);
+    if (currentScreen >= EXPERIENCE_FLOW.situations[0].startScreen) {
+      flowProgress.currentScreen = Math.min(EXPERIENCE_FLOW.totalScreens, currentScreen);
+    }
+    if (!isReviewMode && currentScreen >= EXPERIENCE_FLOW.screens.closing) {
+      finalFlow.screen = Math.min(EXPERIENCE_FLOW.screens.finalization, currentScreen);
     }
     if (!isReviewMode && serverState.completed_at) {
-      finalFlow.screen = 55;
+      finalFlow.screen = EXPERIENCE_FLOW.screens.finalization;
       finalFlow.completionStatus = "completed";
       finalFlow.completionError = "";
     }
-    const currentScene = sceneForScreen(currentScreen);
+    const currentSituation = situationForScreen(currentScreen);
     state = {
-      currentScene,
+      currentScene: currentSituation ? currentSituation.id - 1 : 0,
       currentStep: 0,
-      completedScenes: Array.from({ length: Math.min(currentScene, 5) }, (_, index) => index),
-      unlocked: Array.from({ length: Math.min(currentScene, 5) }, (_, index) => index),
+      completedScenes: [...flowProgress.completedSituations],
+      unlocked: [...flowProgress.completedSituations],
       metrics: null,
     };
     return;
   }
-  state = {
-    currentScene: serverState.current_scene,
-    currentStep: serverState.current_step,
-    completedScenes: serverState.completed_scenes,
-    unlocked: serverState.completed_scenes,
-    metrics: serverState.metrics,
-  };
+  // Las claves de almacenamiento nuevas impiden que una sesión histórica se
+  // interprete con esta interfaz. El backend conserva esas sesiones por versión.
+  flowProgress = createDefaultFlowProgress();
 };
 
 const apiRequest = async (path, options = {}, token = researchSession?.token) => {
@@ -951,29 +1089,20 @@ const apiRequest = async (path, options = {}, token = researchSession?.token) =>
 };
 
 const currentScreenForProgress = () => {
-  if (introPhase === "home") return 1;
-  if (introPhase === "access") return 2;
-  if (introPhase === "presentation") return 3;
-  if (introPhase === "agenda") return 4;
-  if (!isReviewMode && finalFlow.screen >= 54) return Math.min(55, finalFlow.screen);
-  if (situationFiveReviewRequested || hasSituationFiveProgress) return 42 + situationFiveProgress.stage;
-  if (situationFourReviewRequested || hasSituationFourProgress) return 31 + situationFourProgress.stage;
-  if (situationThreeReviewRequested || hasSituationThreeProgress) return 21 + situationThreeProgress.stage;
-  if (state.currentScene === 1 || situationOneProgress.stage >= 7) return 12 + situationTwoProgress.stage;
-  return 5 + situationOneProgress.stage;
+  if (introPhase === "home") return EXPERIENCE_FLOW.screens.home;
+  if (introPhase === "access") return EXPERIENCE_FLOW.screens.folio;
+  if (introPhase === "presentation") return EXPERIENCE_FLOW.screens.presentation;
+  if (introPhase === "agenda") return EXPERIENCE_FLOW.screens.initialAgenda;
+  if (!isReviewMode && finalFlow.screen >= EXPERIENCE_FLOW.screens.closing) {
+    return Math.min(EXPERIENCE_FLOW.screens.finalization, finalFlow.screen);
+  }
+  return flowProgress.currentScreen;
 };
 
 const progressSnapshot = () => ({
   intro_phase: introPhase,
-  has_situation_one_progress: hasSituationOneProgress,
-  has_situation_three_progress: hasSituationThreeProgress,
-  has_situation_four_progress: hasSituationFourProgress,
-  has_situation_five_progress: hasSituationFiveProgress,
-  situation_one: situationOneProgress,
-  situation_two: situationTwoProgress,
-  situation_three: situationThreeProgress,
-  situation_four: situationFourProgress,
-  situation_five: situationFiveProgress,
+  experience_version: EXPERIENCE_FLOW.version,
+  flow_progress: JSON.parse(JSON.stringify(flowProgress)),
   final_flow: {
     current_screen: finalFlow.screen,
     completion_event_id: finalFlow.completionEventId,
@@ -984,18 +1113,9 @@ const progressSnapshot = () => ({
 
 const persistProgressCaches = () => {
   if (!researchSession?.id || isReviewMode) return;
-  const stores = [
-    [SITUATION_ONE_PROGRESS_KEY, researchSession.id, situationOneProgress],
-    [SITUATION_TWO_PROGRESS_KEY, researchSession.id, situationTwoProgress],
-    [SITUATION_THREE_PROGRESS_KEY, `${researchSession.id}:story`, situationThreeProgress],
-    [SITUATION_FOUR_PROGRESS_KEY, `${researchSession.id}:story`, situationFourProgress],
-    [SITUATION_FIVE_PROGRESS_KEY, `${researchSession.id}:story`, situationFiveProgress],
-  ];
-  stores.forEach(([key, progressId, value]) => {
-    const allProgress = loadJson(key, {});
-    allProgress[progressId] = value;
-    localStorage.setItem(key, JSON.stringify(allProgress));
-  });
+  const allProgress = loadJson(FLOW_PROGRESS_KEY, {});
+  allProgress[researchSession.id] = flowProgress;
+  localStorage.setItem(FLOW_PROGRESS_KEY, JSON.stringify(allProgress));
 };
 
 const applyProgressSnapshot = (snapshot) => {
@@ -1004,36 +1124,81 @@ const applyProgressSnapshot = (snapshot) => {
   const restored = (name, fallback) => snapshot[name] && typeof snapshot[name] === "object"
     ? snapshot[name]
     : fallback;
-  situationOneProgress = restored("situation_one", situationOneProgress);
-  situationTwoProgress = restored("situation_two", situationTwoProgress);
-  situationThreeProgress = restored("situation_three", situationThreeProgress);
-  situationFourProgress = restored("situation_four", situationFourProgress);
-  situationFiveProgress = restored("situation_five", situationFiveProgress);
+  const restoredFlow = restored("flow_progress", null);
+  if (restoredFlow) {
+    const restoredSituationOne = restoredFlow.situationData?.[1];
+    const restoredSituationTwo = restoredFlow.situationData?.[2];
+    const restoredSituationThree = restoredFlow.situationData?.[3];
+    flowProgress = {
+      currentScreen: Math.min(
+        EXPERIENCE_FLOW.totalScreens,
+        Math.max(EXPERIENCE_FLOW.situations[0].startScreen, Number(restoredFlow.currentScreen) || defaultFlowProgress.currentScreen),
+      ),
+      completedSituations: Array.isArray(restoredFlow.completedSituations) ? restoredFlow.completedSituations : [],
+      completedActivities: Array.isArray(restoredFlow.completedActivities) ? restoredFlow.completedActivities : [],
+      situationData: {
+        1: {
+          answers: restoredSituationOne?.answers && typeof restoredSituationOne.answers === "object"
+            ? restoredSituationOne.answers
+            : {},
+          objectiveAttempts: restoredSituationOne?.objectiveAttempts && typeof restoredSituationOne.objectiveAttempts === "object"
+            ? restoredSituationOne.objectiveAttempts
+            : {},
+          savedOpenStages: Array.isArray(restoredSituationOne?.savedOpenStages)
+            ? restoredSituationOne.savedOpenStages
+            : [],
+        },
+        2: {
+          answers: restoredSituationTwo?.answers && typeof restoredSituationTwo.answers === "object"
+            ? restoredSituationTwo.answers
+            : {},
+          objectiveAttempts: restoredSituationTwo?.objectiveAttempts && typeof restoredSituationTwo.objectiveAttempts === "object"
+            ? restoredSituationTwo.objectiveAttempts
+            : {},
+          savedOpenStages: Array.isArray(restoredSituationTwo?.savedOpenStages)
+            ? restoredSituationTwo.savedOpenStages
+            : [],
+          notebooksAssigned: Boolean(restoredSituationTwo?.notebooksAssigned),
+          colorsAdded: Boolean(restoredSituationTwo?.colorsAdded),
+          strategySaved: Boolean(restoredSituationTwo?.strategySaved),
+          activityCompleted: Boolean(restoredSituationTwo?.activityCompleted),
+        },
+        3: {
+          answers: restoredSituationThree?.answers && typeof restoredSituationThree.answers === "object"
+            ? restoredSituationThree.answers
+            : {},
+          objectiveAttempts: restoredSituationThree?.objectiveAttempts && typeof restoredSituationThree.objectiveAttempts === "object"
+            ? restoredSituationThree.objectiveAttempts
+            : {},
+          savedOpenStages: Array.isArray(restoredSituationThree?.savedOpenStages)
+            ? restoredSituationThree.savedOpenStages
+            : [],
+          giftPurchased: Boolean(restoredSituationThree?.giftPurchased),
+          quantitiesBuilt: Boolean(restoredSituationThree?.quantitiesBuilt),
+          expenseAdded: Boolean(restoredSituationThree?.expenseAdded),
+          equationCompleted: Boolean(restoredSituationThree?.equationCompleted),
+          strategySaved: Boolean(restoredSituationThree?.strategySaved),
+          registerCompleted: Boolean(restoredSituationThree?.registerCompleted),
+        },
+      },
+    };
+  }
   const restoredFinalFlow = restored("final_flow", null);
   if (!isReviewMode && restoredFinalFlow) {
     finalFlow = {
-      screen: Math.min(55, Math.max(53, Number(restoredFinalFlow.current_screen) || 53)),
+      screen: Math.min(
+        EXPERIENCE_FLOW.screens.finalization,
+        Math.max(EXPERIENCE_FLOW.situations.at(-1).endScreen, Number(restoredFinalFlow.current_screen) || EXPERIENCE_FLOW.situations.at(-1).endScreen),
+      ),
       completionEventId: restoredFinalFlow.completion_event_id || null,
       completionStatus: String(restoredFinalFlow.completion_status || "idle"),
       completionError: String(restoredFinalFlow.completion_error || ""),
     };
   }
-  hasSituationOneProgress = snapshot.has_situation_one_progress === true
-    || Number(situationOneProgress.stage) > 0
-    || Object.keys(situationOneProgress.answers || {}).length > 0;
-  hasSituationThreeProgress = snapshot.has_situation_three_progress === true
-    || Number(situationThreeProgress.stage) > 0
-    || Object.keys(situationThreeProgress.answers || {}).length > 0;
-  hasSituationFourProgress = snapshot.has_situation_four_progress === true
-    || Number(situationFourProgress.stage) > 0
-    || Object.keys(situationFourProgress.answers || {}).length > 0;
-  hasSituationFiveProgress = snapshot.has_situation_five_progress === true
-    || Number(situationFiveProgress.stage) > 0
-    || Object.keys(situationFiveProgress.answers || {}).length > 0;
-  const recoveredScene = sceneForScreen(currentScreenForProgress());
-  state.currentScene = recoveredScene;
-  state.completedScenes = Array.from({ length: Math.min(recoveredScene, 5) }, (_, index) => index);
-  state.unlocked = [...state.completedScenes];
+  const recoveredSituation = situationForScreen(currentScreenForProgress());
+  state.currentScene = recoveredSituation ? recoveredSituation.id - 1 : 0;
+  state.completedScenes = [...flowProgress.completedSituations];
+  state.unlocked = [...flowProgress.completedSituations];
   researchSession.introPhase = introPhase;
   researchSession.finalFlow = { ...finalFlow };
   saveResearchSession();
@@ -1079,7 +1244,11 @@ const queueProgressSnapshot = () => {
 };
 
 const objectiveFieldIds = new Set([
+  "s1_tiempo_total", "s1_numero_actividades", "s1_tiempo_por_actividad",
+  "s1_igualdad_valor_1", "s1_igualdad_valor_2",
   "s1_explora_a", "s1_explora_b", "s1_explora_c", "s1_misma_cantidad",
+  "s2_signo_relacion", "s2_valor_x", "s2_cuaderno_elegido", "s2_comprobacion_igualdad",
+  "s3_valor_lado_derecho", "s3_comprobacion_igualdad",
   "s2_dias_alimento", "s2_dia_comprar_alimento",
   "s3_valor_x", "s3_cuaderno_elegido", "s3_se_mantiene_igualdad",
   "s4_valor_x", "s4_se_mantiene_igualdad",
@@ -1089,7 +1258,10 @@ const objectiveFieldIds = new Set([
 ]);
 
 const numericObjectiveFieldIds = new Set([
+  "s1_tiempo_total", "s1_numero_actividades", "s1_tiempo_por_actividad",
+  "s1_igualdad_valor_1", "s1_igualdad_valor_2",
   "s1_explora_a", "s1_explora_b", "s1_explora_c",
+  "s2_valor_x", "s3_valor_lado_derecho",
   "s2_dias_alimento", "s2_dia_comprar_alimento", "s3_valor_x", "s4_valor_x",
   "s4_registro_ingreso1", "s4_registro_ingreso2", "s4_registro_ingreso3", "s4_registro_ingreso4",
   "s5_valor_x", "s5_resultado_receta1", "s5_resultado_receta2", "s5_gramos_cada_receta",
@@ -1097,6 +1269,8 @@ const numericObjectiveFieldIds = new Set([
 ]);
 
 const narrativeChoiceFieldIds = new Set([
+  "s2_simbolo_elegido",
+  "s3_regalo_elegido",
   "s2_representacion_incognita",
   "s3_representacion_incognita",
   "s4_regalo_elegido",
@@ -1104,7 +1278,7 @@ const narrativeChoiceFieldIds = new Set([
 ]);
 
 const mathFieldId = (fieldId) => [
-  "igualdad", "ecuacion", "representacion_breve", "cinco_cuadernos", "cuatro_ingresos",
+  "igualdad", "ecuacion", "representacion_breve", "cinco_cuadernos", "cuatro_cantidades", "cuatro_ingresos",
   "procedimiento", "sustitucion", "receta1_porciones", "receta1_total", "receta2_total",
 ].some((part) => fieldId.includes(part)) && !fieldId.includes("explicacion");
 
@@ -1189,7 +1363,7 @@ const flushOutbox = async () => {
         }, item.token);
         if (item.type === "complete" && result.state?.completed_at) {
           researchSession.completedAt = result.state.completed_at;
-          finalFlow.screen = 55;
+          finalFlow.screen = EXPERIENCE_FLOW.screens.finalization;
           finalFlow.completionEventId = item.payload.completion_event_id;
           finalFlow.completionStatus = "completed";
           finalFlow.completionError = "";
@@ -1211,7 +1385,7 @@ const flushOutbox = async () => {
   return outboxFlushPromise;
 };
 
-const agendaCompleted = () => state.completedScenes.filter((sceneIndex) => sceneIndex > 0).length;
+const agendaCompleted = () => flowProgress.completedActivities.length;
 
 const showToast = (message) => {
   window.clearTimeout(toastTimer);
@@ -1222,13 +1396,11 @@ const showToast = (message) => {
 
 const updateChrome = () => {
   const done = agendaCompleted();
-  const visibleDiscoveries = state.unlocked.filter((index) => index !== 3);
-  timeValue.textContent = String(Math.max(120 - done * 30, 0));
+  const visibleDiscoveries = [];
+  timeValue.textContent = "60";
   discoveryCount.textContent = String(visibleDiscoveries.length);
-  const scene = scenes[state.currentScene];
-  const stepProgress = scene ? state.currentStep / scene.steps.length : 0;
-  const storyProgress = state.currentScene >= scenes.length ? 1 : (state.completedScenes.length + stepProgress) / scenes.length;
-  progressBar.style.width = `${Math.round(Math.min(storyProgress, 1) * 100)}%`;
+  const storyProgress = (currentScreenForProgress() - 1) / (EXPERIENCE_FLOW.totalScreens - 1);
+  progressBar.style.width = `${Math.round(Math.min(Math.max(storyProgress, 0), 1) * 100)}%`;
   agendaList.innerHTML = agendaItems
     .map((item, index) => `<li class="${index < done ? "done" : ""}"><span class="check" aria-hidden="true">${index < done ? "✓" : ""}</span><span>${item}</span></li>`)
     .join("");
@@ -1299,9 +1471,9 @@ const renderInitialAgenda = () => {
         <p class="s1-dialogue-line">Tengo varias cosas por hacer hoy. Será mejor comenzar organizando mi tiempo.</p>
         <div class="s1-agenda-content">
           <h1>La agenda de Tadeo</h1>
-          <div class="s1-agenda-book">
-            <img src="./assets/objects/Agenda%20abierta%204%20actividades.png" alt="Agenda abierta de Tadeo" />
-            <ol class="s1-agenda-book-list">${items}</ol>
+          <div class="two-activity-agenda" aria-label="Agenda de Tadeo con dos actividades">
+            <div class="two-activity-agenda-heading"><span aria-hidden="true">★</span><strong>Plan de la tarde</strong><span aria-hidden="true">★</span></div>
+            <ol class="two-activity-agenda-list">${items}</ol>
           </div>
           <div class="form-actions">
             <button class="primary-button" type="button" data-action="start-game">COMENZAR</button>
@@ -2938,36 +3110,828 @@ const renderFinish = () => {
     </section>`;
 };
 
+const flowPanel = (screen, kicker, title, content, extraClass = "") => `
+  <section class="screen situation-one-screen s1-game-stage flow-scaffold-screen ${extraClass}" data-flow-screen="${screen}" style="background-image: url('./assets/scenes/habitacion.png')">
+    <img class="s1-stage-character" src="./assets/characters/tadeo-pensando.png" alt="Tadeo" />
+    <div class="s1-interface-panel flow-scaffold-panel">
+      <div class="s1-panel-heading">
+        <span class="s1-panel-kicker">Pantalla ${screen} de ${EXPERIENCE_FLOW.totalScreens}</span>
+        <span class="s1-panel-scene">${kicker}</span>
+      </div>
+      <h1>${title}</h1>
+      ${content}
+    </div>
+  </section>`;
+
+const SITUATION_ONE_CONTEXT = "Tadeo tiene 60 minutos para realizar las dos actividades de su agenda y quiere dedicar el mismo tiempo a cada una.";
+const SITUATION_ONE_FIRST_RETRY = "Revisa la información del problema e inténtalo nuevamente.";
+const SITUATION_ONE_ATTEMPTS_COMPLETE = "Respuesta registrada. Puedes continuar.";
+
+const flowSituation = (situationId) => EXPERIENCE_FLOW.situations.find(({ id }) => id === situationId);
+const flowSituationScreen = (situationId, stageIndex) => flowSituation(situationId).startScreen + stageIndex;
+
+const flowSituationOneData = () => {
+  if (!flowProgress.situationData) flowProgress.situationData = {};
+  if (!flowProgress.situationData[1]) {
+    flowProgress.situationData[1] = { answers: {}, objectiveAttempts: {}, savedOpenStages: [] };
+  }
+  return flowProgress.situationData[1];
+};
+
+const flowSituationOneAttempts = (activityId) => {
+  const attempts = flowSituationOneData().objectiveAttempts[activityId];
+  return Array.isArray(attempts) ? attempts : [];
+};
+
+const flowSituationOneValue = (fieldId) => escapeHtml(flowSituationOneData().answers[fieldId] || "");
+
+const flowSituationOneFeedback = (activityId) => {
+  const attempts = flowSituationOneAttempts(activityId);
+  if (!attempts.length || attempts.at(-1).correct) return "";
+  return attempts.length >= 2 ? SITUATION_ONE_ATTEMPTS_COMPLETE : SITUATION_ONE_FIRST_RETRY;
+};
+
+const flowSituationOneProblemInfo = () => `
+  <button class="s1-problem-info-button" type="button" data-action="s1-show-problem-info">VER INFORMACIÓN DEL PROBLEMA</button>
+  <dialog class="s1-problem-dialog" id="s1-problem-dialog" aria-labelledby="s1-problem-dialog-title">
+    <button class="dialog-close" type="button" data-action="s1-close-problem-info" aria-label="Cerrar">×</button>
+    <div class="dialog-heading">
+      <h2 id="s1-problem-dialog-title">Información del problema</h2>
+      <p>${SITUATION_ONE_CONTEXT}</p>
+    </div>
+    <button class="secondary-button" type="button" data-action="s1-close-problem-info">CERRAR</button>
+  </dialog>`;
+
+const flowSituationOneObjectiveActions = (activityId) => {
+  const attempts = flowSituationOneAttempts(activityId);
+  const exhausted = attempts.length >= 2 && !attempts.some(({ correct }) => correct);
+  return `
+    <p class="feedback" id="feedback" role="status">${flowSituationOneFeedback(activityId)}</p>
+    <div class="form-actions">
+      ${exhausted
+        ? '<button class="primary-button" type="button" data-action="s1-continue-after-attempts">CONTINUAR</button>'
+        : '<button class="primary-button" type="submit">CONTINUAR</button>'}
+    </div>`;
+};
+
+const flowSituationOneContextScreen = () => {
+  const activityId = "s1_contexto";
+  return `
+    <p class="s1-situation-context">${SITUATION_ONE_CONTEXT}</p>
+    <form class="challenge-form s1-flow-form" id="challenge-form" data-flow-situation="1" data-s1-flow-stage="0" novalidate>
+      <label class="field-group">
+        <span class="field-label">a) ¿Cuánto tiempo tiene Tadeo en total para realizar sus actividades?</span>
+        <span class="s1-unit-field"><input class="text-input" inputmode="numeric" name="s1_tiempo_total" value="${flowSituationOneValue("s1_tiempo_total")}" autocomplete="off" required /><span>minutos</span></span>
+      </label>
+      <label class="field-group">
+        <span class="field-label">b) ¿Cuántas actividades tiene pendientes?</span>
+        <span class="s1-unit-field"><input class="text-input" inputmode="numeric" name="s1_numero_actividades" value="${flowSituationOneValue("s1_numero_actividades")}" autocomplete="off" required /><span>actividades</span></span>
+      </label>
+      <label class="field-group">
+        <span class="field-label">c) Si quiere dedicar el mismo tiempo a cada actividad, ¿cuántos minutos puede dedicar a cada una?</span>
+        <span class="s1-unit-field"><input class="text-input" inputmode="numeric" name="s1_tiempo_por_actividad" value="${flowSituationOneValue("s1_tiempo_por_actividad")}" autocomplete="off" required /><span>minutos</span></span>
+      </label>
+      ${flowSituationOneObjectiveActions(activityId)}
+    </form>`;
+};
+
+const flowSituationOneDistributionScreen = () => `
+  <p class="challenge-intro">Representa cómo puede distribuir Tadeo los 60 minutos entre sus dos actividades.</p>
+  ${flowSituationOneProblemInfo()}
+  <form class="challenge-form s1-flow-form" id="challenge-form" data-flow-situation="1" data-s1-flow-stage="1" novalidate>
+    <div class="s1-equality-builder" aria-label="Completa la igualdad">
+      <input class="text-input" inputmode="numeric" name="s1_igualdad_valor_1" aria-label="Primer valor" value="${flowSituationOneValue("s1_igualdad_valor_1")}" autocomplete="off" required />
+      <span aria-hidden="true">+</span>
+      <input class="text-input" inputmode="numeric" name="s1_igualdad_valor_2" aria-label="Segundo valor" value="${flowSituationOneValue("s1_igualdad_valor_2")}" autocomplete="off" required />
+      <span aria-hidden="true">= 60</span>
+    </div>
+    ${flowSituationOneObjectiveActions("s1_distribucion")}
+  </form>`;
+
+const flowSituationOneMeaningScreen = () => {
+  const saved = flowSituationOneData().savedOpenStages.includes(2);
+  const readonly = saved ? " readonly" : "";
+  return `
+    <div class="s1-math-display" aria-label="30 más 30 es igual a 60">30 + 30 = 60</div>
+    ${flowSituationOneProblemInfo()}
+    <form class="challenge-form s1-flow-form" id="challenge-form" data-flow-situation="1" data-s1-flow-stage="2" novalidate>
+      <label class="field-group">
+        <span class="field-label">¿Qué representa la cantidad que aparece a la izquierda del signo igual? Explícalo con tus palabras.</span>
+        <textarea class="text-input open-response" name="s1_significado_izquierda" required${readonly}>${flowSituationOneValue("s1_significado_izquierda")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">¿Qué representa la cantidad que aparece a la derecha del signo igual? Explícalo con tus palabras.</span>
+        <textarea class="text-input open-response" name="s1_significado_derecha" required${readonly}>${flowSituationOneValue("s1_significado_derecha")}</textarea>
+      </label>
+      ${saved
+        ? '<p class="feedback success" id="feedback" role="status">Respuesta registrada.</p><div class="form-actions"><button class="primary-button" type="button" data-action="s1-open-response-continue">CONTINUAR</button></div>'
+        : '<p class="feedback" id="feedback" role="status"></p><div class="form-actions"><button class="primary-button" type="submit">GUARDAR RESPUESTAS</button></div>'}
+    </form>`;
+};
+
+const flowSituationOneEqualityScreen = () => {
+  const selected = flowSituationOneData().answers.s1_misma_cantidad || "";
+  return `
+    <div class="s1-math-display" aria-label="30 más 30 es igual a 60">30 + 30 = 60</div>
+    ${flowSituationOneProblemInfo()}
+    <form class="challenge-form s1-flow-form" id="challenge-form" data-flow-situation="1" data-s1-flow-stage="3" novalidate>
+      <fieldset class="field-group">
+        <legend>¿Ambos lados representan la misma cantidad?</legend>
+        <div class="answer-grid two-options">
+          <label class="answer-choice"><input type="radio" name="s1_misma_cantidad" value="Sí" ${selected === "Sí" ? "checked" : ""} required /><span>Sí</span></label>
+          <label class="answer-choice"><input type="radio" name="s1_misma_cantidad" value="No" ${selected === "No" ? "checked" : ""} required /><span>No</span></label>
+        </div>
+      </fieldset>
+      <label class="field-group">
+        <span class="field-label">¿Por qué? Explícalo con tus palabras.</span>
+        <textarea class="text-input open-response" name="s1_justificacion" required>${flowSituationOneValue("s1_justificacion")}</textarea>
+      </label>
+      ${flowSituationOneObjectiveActions("s1_misma_cantidad")}
+    </form>`;
+};
+
+const flowSituationOneDiscoveryScreen = () => `
+  <article class="s1-flow-discovery">
+    <span class="s1-discovery-label">Mi descubrimiento</span>
+    <p>El signo = indica que las expresiones que se encuentran a ambos lados representan la misma cantidad.</p>
+    <p>Por ejemplo:</p>
+    <div class="s1-math-display" aria-label="30 más 30 es igual a 60">30 + 30 = 60</div>
+    <p>Aunque están escritas de manera diferente, ambas partes representan el mismo valor.</p>
+  </article>
+  <div class="form-actions"><button class="primary-button" type="button" data-action="s1-discovery-continue">CONTINUAR</button></div>`;
+
+const flowSituationOneAgendaScreen = () => {
+  const items = agendaItems.map((item) => `<li><span class="s1-pending-box" aria-hidden="true">□</span><span>${item}</span></li>`).join("");
+  return `
+    <p class="s1-dialogue-line">Ya organicé mi tiempo. Comenzaré por la papelería.</p>
+    <div class="two-activity-agenda s1-pending-agenda" aria-label="Agenda de Tadeo con dos actividades pendientes">
+      <div class="two-activity-agenda-heading"><span aria-hidden="true">★</span><strong>Plan de la tarde</strong><span aria-hidden="true">★</span></div>
+      <ul class="two-activity-agenda-list">${items}</ul>
+    </div>
+    <div class="form-actions"><button class="primary-button" type="button" data-action="s1-go-papeleria">IR A LA PAPELERÍA</button></div>`;
+};
+
+const renderFlowSituationOne = (situation) => {
+  const stageIndex = Math.min(situation.screenCount - 1, Math.max(0, flowProgress.currentScreen - situation.startScreen));
+  const screens = [
+    flowSituationOneContextScreen,
+    flowSituationOneDistributionScreen,
+    flowSituationOneMeaningScreen,
+    flowSituationOneEqualityScreen,
+    flowSituationOneDiscoveryScreen,
+    flowSituationOneAgendaScreen,
+  ];
+  const screen = flowSituationScreen(1, stageIndex);
+  progressBar.style.width = `${Math.round(((screen - 1) / (EXPERIENCE_FLOW.totalScreens - 1)) * 100)}%`;
+  app.innerHTML = flowPanel(
+    screen,
+    `Situación 1 de ${EXPERIENCE_FLOW.situations.length}`,
+    "Organizando el tiempo",
+    screens[stageIndex](),
+  );
+};
+
+const SITUATION_TWO_CONTEXT = `Tadeo necesita comprar 5 cuadernos iguales y un paquete de colores.<br><br>El paquete de colores cuesta $50 y por toda la compra deberá pagar $250.<br><br>Tadeo necesita averiguar cuánto cuesta cada cuaderno.`;
+const SITUATION_TWO_SYMBOLS = Object.freeze(["x", "a", "?", "△", "□", "○", "★", "◆"]);
+const SITUATION_TWO_NOTEBOOKS = Object.freeze([
+  Object.freeze({ value: "Cuaderno A — $35", label: "Cuaderno A", price: "$35", image: "./assets/objects/cuaderno-a.png", style: "basic" }),
+  Object.freeze({ value: "Cuaderno B — $40", label: "Cuaderno B", price: "$40", image: "./assets/objects/cuaderno-b.png", style: "standard" }),
+  Object.freeze({ value: "Cuaderno C — $65", label: "Cuaderno C", price: "$65", image: "./assets/objects/cuaderno-c.png", style: "premium" }),
+]);
+
+const flowSituationTwoData = () => {
+  if (!flowProgress.situationData) flowProgress.situationData = {};
+  if (!flowProgress.situationData[2]) {
+    flowProgress.situationData[2] = {
+      answers: {},
+      objectiveAttempts: {},
+      savedOpenStages: [],
+      notebooksAssigned: false,
+      colorsAdded: false,
+      strategySaved: false,
+      activityCompleted: false,
+    };
+  }
+  return flowProgress.situationData[2];
+};
+
+const flowSituationTwoAttempts = (activityId) => {
+  const attempts = flowSituationTwoData().objectiveAttempts[activityId];
+  return Array.isArray(attempts) ? attempts : [];
+};
+
+const flowSituationTwoValue = (fieldId) => escapeHtml(flowSituationTwoData().answers[fieldId] || "");
+const flowSituationTwoSymbol = () => flowSituationTwoData().answers.s2_simbolo_elegido || "";
+const flowSituationTwoRepeatedSymbol = () => Array(5).fill(escapeHtml(flowSituationTwoSymbol())).join(" + ");
+
+const flowSituationTwoPanel = (screen, content, extraClass = "") => `
+  <section class="screen s1-game-stage s2-flow-stage ${extraClass}" data-flow-screen="${screen}" style="background-image: url('./assets/scenes/papeleria.png')">
+    <div class="s2-flow-characters" aria-hidden="true">
+      <img class="s2-flow-tadeo" src="./assets/characters/tadeo-pensando.png" alt="" />
+      <img class="s2-flow-clerk" src="./assets/characters/encargado-papeleria.png" alt="" />
+    </div>
+    <div class="s1-interface-panel s2-flow-panel">
+      <div class="s1-panel-heading">
+        <span class="s1-panel-kicker">Pantalla ${screen} de ${EXPERIENCE_FLOW.totalScreens}</span>
+        <span class="s1-panel-scene">Situación 2 de ${EXPERIENCE_FLOW.situations.length}</span>
+      </div>
+      <h1>En la papelería</h1>
+      ${content}
+    </div>
+  </section>`;
+
+const flowSituationTwoFeedback = (activityId) => {
+  const attempts = flowSituationTwoAttempts(activityId);
+  if (!attempts.length || attempts.at(-1).correct) return "";
+  if (attempts.length >= 2) return SITUATION_ONE_ATTEMPTS_COMPLETE;
+  return {
+    s2_signo_relacion: "Revisa la relación entre el costo de los productos y el total de la compra.",
+    s2_valor_x: "Revisa la información de la compra y tu estrategia. Puedes intentarlo nuevamente.",
+  }[activityId] || "";
+};
+
+const flowSituationTwoObjectiveActions = (activityId) => {
+  const attempts = flowSituationTwoAttempts(activityId);
+  const exhausted = attempts.length >= 2 && !attempts.some(({ correct }) => correct);
+  return `
+    <p class="feedback" id="feedback" role="status">${flowSituationTwoFeedback(activityId)}</p>
+    <div class="form-actions">
+      ${exhausted
+        ? '<button class="primary-button" type="button" data-action="s2-flow-continue-after-attempts">CONTINUAR</button>'
+        : '<button class="primary-button" type="submit">CONTINUAR</button>'}
+    </div>`;
+};
+
+const flowSituationTwoProblemInfo = () => `
+  <button class="s1-problem-info-button" type="button" data-action="s2-show-problem-info">VER INFORMACIÓN DEL PROBLEMA</button>
+  <dialog class="s1-problem-dialog" id="s2-problem-dialog" aria-labelledby="s2-problem-dialog-title">
+    <button class="dialog-close" type="button" data-action="s2-close-problem-info" aria-label="Cerrar">×</button>
+    <div class="dialog-heading">
+      <h2 id="s2-problem-dialog-title">Información del problema</h2>
+      <ul class="s2-problem-facts">
+        <li>5 cuadernos iguales</li>
+        <li>Colores: $50</li>
+        <li>Total: $250</li>
+      </ul>
+    </div>
+    <button class="secondary-button" type="button" data-action="s2-close-problem-info">CERRAR</button>
+  </dialog>`;
+
+const flowSituationTwoOpenActions = (stageIndex) => {
+  const saved = flowSituationTwoData().savedOpenStages.includes(stageIndex);
+  return saved
+    ? '<p class="feedback success" id="feedback" role="status">Respuesta registrada.</p><div class="form-actions"><button class="primary-button" type="button" data-action="s2-flow-open-continue">CONTINUAR</button></div>'
+    : '<p class="feedback" id="feedback" role="status"></p><div class="form-actions"><button class="primary-button" type="submit">GUARDAR RESPUESTAS</button></div>';
+};
+
+const flowSituationTwoContextScreen = () => {
+  const saved = flowSituationTwoData().savedOpenStages.includes(0);
+  const readonly = saved ? " readonly" : "";
+  return `
+    <p class="s2-flow-context">${SITUATION_TWO_CONTEXT}</p>
+    <form class="challenge-form s2-flow-form" id="challenge-form" data-flow-situation="2" data-s2-flow-stage="0" novalidate>
+      <label class="field-group">
+        <span class="field-label">¿Qué información conoces de la compra de Tadeo?</span>
+        <textarea class="text-input open-response" name="s2_informacion_conocida" required${readonly}>${flowSituationTwoValue("s2_informacion_conocida")}</textarea>
+      </label>
+      <label class="field-group">
+        <span class="field-label">¿Qué necesita averiguar Tadeo?</span>
+        <textarea class="text-input open-response" name="s2_que_averiguar" required${readonly}>${flowSituationTwoValue("s2_que_averiguar")}</textarea>
+      </label>
+      ${flowSituationTwoOpenActions(0)}
+    </form>`;
+};
+
+const flowSituationTwoSymbolScreen = () => {
+  const progress = flowSituationTwoData();
+  const selected = flowSituationTwoSymbol();
+  const saved = progress.savedOpenStages.includes(1);
+  const symbolButtons = SITUATION_TWO_SYMBOLS.map((symbol) => `
+    <button class="s2-flow-symbol${selected === symbol ? " selected" : ""}" type="button" role="radio" aria-checked="${selected === symbol}" data-action="s2-flow-select-symbol" data-symbol="${escapeHtml(symbol)}" ${saved ? "disabled" : ""}>${escapeHtml(symbol)}</button>`).join("");
+  return `
+    <p class="challenge-intro">El precio de cada cuaderno es una cantidad que todavía no conocemos.<br><br>Elige un símbolo para representarla.</p>
+    <div class="s2-flow-symbols" role="radiogroup" aria-label="Símbolo para representar la cantidad">${symbolButtons}</div>
+    ${selected ? `
+      <form class="challenge-form s2-flow-form" id="challenge-form" data-flow-situation="2" data-s2-flow-stage="1" novalidate>
+        <input type="hidden" name="s2_simbolo_elegido" value="${escapeHtml(selected)}" />
+        <label class="field-group">
+          <span class="field-label">¿Qué representa el símbolo que elegiste? Explícalo con tus palabras.</span>
+          <textarea class="text-input open-response" name="s2_significado_simbolo" required${saved ? " readonly" : ""}>${flowSituationTwoValue("s2_significado_simbolo")}</textarea>
+        </label>
+        ${flowSituationTwoOpenActions(1)}
+      </form>` : ""}`;
+};
+
+const flowSituationTwoNotebookVisuals = (showSymbol = false) => Array.from({ length: 5 }, (_, index) => `
+  <figure class="s2-flow-notebook">
+    <img src="./assets/objects/cuaderno-b.png" alt="Cuaderno ${index + 1}" />
+    ${showSymbol ? `<figcaption>${escapeHtml(flowSituationTwoSymbol())}</figcaption>` : ""}
+  </figure>`).join("");
+
+const flowSituationTwoFiveNotebooksScreen = () => {
+  const assigned = flowSituationTwoData().notebooksAssigned;
+  return `
+    <p class="challenge-intro">Asigna el símbolo que elegiste a cada cuaderno para representar su precio.</p>
+    <div class="s2-five-notebooks" aria-label="Cinco cuadernos iguales">${flowSituationTwoNotebookVisuals(assigned)}</div>
+    ${assigned
+      ? `<div class="s2-flow-expression" aria-label="Representación de cinco cantidades iguales">${flowSituationTwoRepeatedSymbol()}</div><div class="form-actions"><button class="primary-button" type="button" data-action="s2-flow-notebooks-continue">CONTINUAR</button></div>`
+      : '<div class="form-actions"><button class="primary-button" type="button" data-action="s2-flow-assign-notebooks">ASIGNAR SÍMBOLO A LOS 5 CUADERNOS</button></div>'}`;
+};
+
+const flowSituationTwoCompletePurchaseScreen = () => {
+  const progress = flowSituationTwoData();
+  const selected = progress.answers.s2_signo_relacion || "";
+  const relationOptions = ["=", "<", ">"].map((symbol) => `
+    <label class="answer-choice s2-relation-choice"><input type="radio" name="s2_signo_relacion" value="${escapeHtml(symbol)}" ${selected === symbol ? "checked" : ""} required /><span>${escapeHtml(symbol)}</span></label>`).join("");
+  return `
+    <p class="challenge-intro">Agrega el paquete de colores a la compra de Tadeo.</p>
+    <div class="s2-purchase-builder">
+      <div class="s2-five-notebooks compact" aria-label="Cinco cuadernos con el símbolo elegido">${flowSituationTwoNotebookVisuals(true)}</div>
+      <div class="s2-color-package${progress.colorsAdded ? " added" : ""}">
+        <img src="./assets/objects/colores.png" alt="Paquete de colores" /><strong>$50</strong>
+      </div>
+    </div>
+    ${progress.colorsAdded ? `
+      <div class="s2-flow-expression">${flowSituationTwoRepeatedSymbol()} + 50</div>
+      <p class="challenge-intro">La compra completa cuesta $250.<br><br>Selecciona el signo que relaciona el costo de los productos con el total de la compra.</p>
+      <form class="challenge-form s2-flow-form" id="challenge-form" data-flow-situation="2" data-s2-flow-stage="3" novalidate>
+        <div class="answer-grid s2-relation-grid">${relationOptions}</div>
+        ${selected ? `<div class="s2-flow-expression">${flowSituationTwoRepeatedSymbol()} + 50 ${escapeHtml(selected)} 250</div>` : ""}
+        ${flowSituationTwoObjectiveActions("s2_signo_relacion")}
+      </form>`
+      : '<div class="form-actions"><button class="primary-button" type="button" data-action="s2-flow-add-colors">AGREGAR PAQUETE DE COLORES</button></div>'}`;
+};
+
+const flowSituationTwoBriefRepresentationScreen = () => {
+  const saved = flowSituationTwoData().savedOpenStages.includes(4);
+  return `
+    <div class="s2-flow-expression">${flowSituationTwoRepeatedSymbol()} + 50 = 250</div>
+    <p class="challenge-intro">Observa que el mismo símbolo aparece cinco veces.<br><br>¿Cómo podrías representar de manera más breve cinco veces la misma cantidad?</p>
+    <form class="challenge-form s2-flow-form" id="challenge-form" data-flow-situation="2" data-s2-flow-stage="4" novalidate>
+      <textarea class="text-input s2-math-response" name="s2_representacion_breve" aria-label="¿Cómo podrías representar de manera más breve cinco veces la misma cantidad?" required${saved ? " readonly" : ""}>${flowSituationTwoValue("s2_representacion_breve")}</textarea>
+      ${flowSituationTwoOpenActions(4)}
+    </form>`;
+};
+
+const flowSituationTwoDiscoveryScreen = () => `
+  <article class="s1-flow-discovery s2-flow-discovery">
+    <span class="s1-discovery-label">Mi descubrimiento</span>
+    <p>Una cantidad que todavía no conocemos puede representarse mediante un símbolo o una letra.</p>
+    <p>En matemáticas es común utilizar letras como x para representar cantidades desconocidas.</p>
+    <p>Cinco veces una misma cantidad puede escribirse como 5x.</p>
+    <p>Una ecuación es una igualdad en la que aparece una cantidad desconocida.</p>
+    <p>En esta situación:</p>
+    <div class="s1-math-display" aria-label="Cinco x más cincuenta es igual a doscientos cincuenta">5x + 50 = 250</div>
+    <p>x representa el precio de cada cuaderno.</p>
+  </article>
+  <div class="form-actions"><button class="primary-button" type="button" data-action="s2-flow-discovery-continue">CONTINUAR</button></div>`;
+
+const flowSituationTwoSolveScreen = () => {
+  const progress = flowSituationTwoData();
+  return `
+    <div class="s1-math-display" aria-label="Cinco x más cincuenta es igual a doscientos cincuenta">5x + 50 = 250</div>
+    ${flowSituationTwoProblemInfo()}
+    ${progress.strategySaved ? `
+      <label class="field-group s2-saved-strategy">
+        <span class="field-label">¿Cómo podrías encontrar el valor de x? Puedes utilizar la estrategia que consideres conveniente.</span>
+        <textarea class="text-input open-response" readonly>${flowSituationTwoValue("s2_estrategia_resolucion")}</textarea>
+      </label>
+      <p class="feedback success" role="status">Respuesta registrada.</p>
+      <form class="challenge-form s2-flow-form" id="challenge-form" data-flow-situation="2" data-s2-flow-stage="6" data-s2-flow-form="value" novalidate>
+        <label class="field-group">
+          <span class="field-label">¿Qué valor encontraste para x?</span>
+          <span class="s2-money-field"><span>$</span><input class="text-input" type="number" inputmode="numeric" name="s2_valor_x" value="${flowSituationTwoValue("s2_valor_x")}" autocomplete="off" required /></span>
+        </label>
+        ${flowSituationTwoObjectiveActions("s2_valor_x")}
+      </form>` : `
+      <form class="challenge-form s2-flow-form" id="challenge-form" data-flow-situation="2" data-s2-flow-stage="6" data-s2-flow-form="strategy" novalidate>
+        <label class="field-group">
+          <span class="field-label">¿Cómo podrías encontrar el valor de x? Puedes utilizar la estrategia que consideres conveniente.</span>
+          <textarea class="text-input open-response s2-strategy-response" name="s2_estrategia_resolucion" required>${flowSituationTwoValue("s2_estrategia_resolucion")}</textarea>
+        </label>
+        <div class="form-actions"><button class="primary-button" type="submit">GUARDAR RESPUESTA</button></div>
+      </form>`}`;
+};
+
+const flowSituationTwoChooseNotebookScreen = () => {
+  const selected = flowSituationTwoData().answers.s2_cuaderno_elegido || "";
+  const choices = SITUATION_TWO_NOTEBOOKS.map((notebook) => `
+    <label class="s2-notebook-choice ${notebook.style}">
+      <input type="radio" name="s2_cuaderno_elegido" value="${notebook.value}" ${selected === notebook.value ? "checked" : ""} required />
+      <span><img src="${notebook.image}" alt="" /><strong>${notebook.label}</strong><small>${notebook.price}</small></span>
+    </label>`).join("");
+  return `
+    <p class="challenge-intro">De acuerdo con el valor que encontraste, ¿qué cuaderno puede comprar Tadeo para que el total de la compra sea $250?</p>
+    <form class="challenge-form s2-flow-form" id="challenge-form" data-flow-situation="2" data-s2-flow-stage="7" novalidate>
+      <div class="s2-notebook-options" role="radiogroup" aria-label="Opciones de cuaderno">${choices}</div>
+      ${flowSituationTwoObjectiveActions("s2_cuaderno_elegido")}
+    </form>`;
+};
+
+const flowSituationTwoCheckScreen = () => {
+  const progress = flowSituationTwoData();
+  const selected = progress.answers.s2_comprobacion_igualdad || "";
+  return `
+    <p class="challenge-intro">Comprueba tu elección sustituyendo el precio del cuaderno.</p>
+    <div class="s2-check-sequence" aria-label="Comprobación de la compra">
+      <span>5(40) + 50 = 250</span>
+      <span>200 + 50 = 250</span>
+      <strong>250 = 250</strong>
+    </div>
+    ${progress.activityCompleted ? `
+      <div class="s2-completion-reward" role="status"><img src="./assets/characters/tadeo-celebrando.png" alt="Tadeo celebra" /><strong>¡Compra completada!</strong></div>
+      <div class="form-actions"><button class="primary-button" type="button" data-action="s2-flow-reward-continue">CONTINUAR</button></div>` : `
+      <form class="challenge-form s2-flow-form" id="challenge-form" data-flow-situation="2" data-s2-flow-stage="8" novalidate>
+        <fieldset class="field-group"><legend>¿Ambos lados representan la misma cantidad?</legend>
+          <div class="answer-grid two-options">
+            <label class="answer-choice"><input type="radio" name="s2_comprobacion_igualdad" value="Sí" ${selected === "Sí" ? "checked" : ""} required /><span>Sí</span></label>
+            <label class="answer-choice"><input type="radio" name="s2_comprobacion_igualdad" value="No" ${selected === "No" ? "checked" : ""} required /><span>No</span></label>
+          </div>
+        </fieldset>
+        ${flowSituationTwoObjectiveActions("s2_comprobacion_igualdad")}
+      </form>`}`;
+};
+
+const flowSituationTwoAgendaScreen = () => `
+  <p class="s1-dialogue-line">Ya tengo los cuadernos y los colores. Ahora iré por el regalo de Eloísa.</p>
+  <div class="two-activity-agenda s2-updated-agenda" aria-label="Agenda con Papelería completada y Regalo pendiente">
+    <div class="two-activity-agenda-heading"><span aria-hidden="true">★</span><strong>Plan de la tarde</strong><span aria-hidden="true">★</span></div>
+    <ul class="two-activity-agenda-list">
+      <li class="done"><span class="s2-agenda-check" aria-hidden="true">☑</span><span>Ir a la papelería a comprar 5 cuadernos y un paquete de colores.</span></li>
+      <li><span class="s2-agenda-check" aria-hidden="true">☐</span><span>Comprar un regalo para Eloísa.</span></li>
+    </ul>
+  </div>
+  <div class="form-actions"><button class="primary-button" type="button" data-action="s2-flow-go-store">IR A LA TIENDA</button></div>`;
+
+const renderFlowSituationTwo = (situation) => {
+  const stageIndex = Math.min(situation.screenCount - 1, Math.max(0, flowProgress.currentScreen - situation.startScreen));
+  const screens = [
+    flowSituationTwoContextScreen,
+    flowSituationTwoSymbolScreen,
+    flowSituationTwoFiveNotebooksScreen,
+    flowSituationTwoCompletePurchaseScreen,
+    flowSituationTwoBriefRepresentationScreen,
+    flowSituationTwoDiscoveryScreen,
+    flowSituationTwoSolveScreen,
+    flowSituationTwoChooseNotebookScreen,
+    flowSituationTwoCheckScreen,
+    flowSituationTwoAgendaScreen,
+  ];
+  const screen = flowSituationScreen(2, stageIndex);
+  progressBar.style.width = `${Math.round(((screen - 1) / (EXPERIENCE_FLOW.totalScreens - 1)) * 100)}%`;
+  app.innerHTML = flowSituationTwoPanel(screen, screens[stageIndex](), `s2-flow-screen-${stageIndex}`);
+};
+
+const SITUATION_THREE_GIFTS = Object.freeze([
+  Object.freeze({ value: "regalo-peluche", image: "./assets/objects/regalo-peluche.png", accessibleLabel: "Opción de regalo 1" }),
+  Object.freeze({ value: "regalo-caja", image: "./assets/objects/regalo-caja.png", accessibleLabel: "Opción de regalo 2" }),
+  Object.freeze({ value: "regalo-lampara", image: "./assets/objects/regalo-lampara.png", accessibleLabel: "Opción de regalo 3" }),
+]);
+
+const flowSituationThreeData = () => {
+  if (!flowProgress.situationData) flowProgress.situationData = {};
+  if (!flowProgress.situationData[3]) {
+    flowProgress.situationData[3] = {
+      answers: {},
+      objectiveAttempts: {},
+      savedOpenStages: [],
+      giftPurchased: false,
+      quantitiesBuilt: false,
+      expenseAdded: false,
+      equationCompleted: false,
+      strategySaved: false,
+      registerCompleted: false,
+    };
+  }
+  return flowProgress.situationData[3];
+};
+
+const flowSituationThreeAttempts = (activityId) => {
+  const attempts = flowSituationThreeData().objectiveAttempts[activityId];
+  return Array.isArray(attempts) ? attempts : [];
+};
+
+const flowSituationThreeValue = (fieldId) => escapeHtml(flowSituationThreeData().answers[fieldId] || "");
+
+const flowSituationThreeFeedback = (activityId) => {
+  const attempts = flowSituationThreeAttempts(activityId);
+  if (!attempts.length || attempts.at(-1).correct) return "";
+  if (attempts.length >= 2) return SITUATION_ONE_ATTEMPTS_COMPLETE;
+  return {
+    s3_valor_lado_derecho: "Revisa cuánto dinero le quedó a Tadeo después de comprar el regalo.",
+    s3_valor_x: "Revisa la información del problema y tu estrategia. Puedes intentarlo nuevamente.",
+  }[activityId] || "";
+};
+
+const flowSituationThreeObjectiveActions = (activityId) => {
+  const attempts = flowSituationThreeAttempts(activityId);
+  const exhausted = attempts.length >= 2 && !attempts.some(({ correct }) => correct);
+  return `
+    <p class="feedback" id="feedback" role="status">${flowSituationThreeFeedback(activityId)}</p>
+    <div class="form-actions">
+      ${exhausted
+        ? '<button class="primary-button" type="button" data-action="s3-flow-continue-after-attempts">CONTINUAR</button>'
+        : '<button class="primary-button" type="submit">CONTINUAR</button>'}
+    </div>`;
+};
+
+const flowSituationThreeOpenActions = (stageIndex) => {
+  const saved = flowSituationThreeData().savedOpenStages.includes(stageIndex);
+  return saved
+    ? '<p class="feedback success" id="feedback" role="status">Respuesta registrada.</p><div class="form-actions"><button class="primary-button" type="button" data-action="s3-flow-open-continue">CONTINUAR</button></div>'
+    : '<p class="feedback" id="feedback" role="status"></p><div class="form-actions"><button class="primary-button" type="submit">GUARDAR RESPUESTAS</button></div>';
+};
+
+const flowSituationThreeSelectedGift = () => SITUATION_THREE_GIFTS.find(
+  ({ value }) => value === flowSituationThreeData().answers.s3_regalo_elegido,
+) || SITUATION_THREE_GIFTS[0];
+
+const flowSituationThreePanel = (screen, content, extraClass = "") => {
+  const atStore = screen === flowSituation(3).startScreen;
+  const background = atStore ? "./assets/scenes/regalos.png" : "./assets/scenes/habitacion.png";
+  return `
+    <section class="screen s1-game-stage s3-flow-stage ${extraClass}" data-flow-screen="${screen}" style="background-image: url('${background}')">
+      <div class="s3-flow-characters" aria-hidden="true">
+        <img class="s3-flow-tadeo" src="./assets/characters/${flowSituationThreeData().registerCompleted || screen === flowSituation(3).endScreen ? "tadeo-celebrando.png" : "tadeo-pensando.png"}" alt="" />
+        ${atStore ? '<img class="s3-flow-clerk" src="./assets/characters/encargada-regalos.png" alt="" />' : ""}
+      </div>
+      <div class="s1-interface-panel s3-flow-panel">
+        <div class="s1-panel-heading">
+          <span class="s1-panel-kicker">Pantalla ${screen} de ${EXPERIENCE_FLOW.totalScreens}</span>
+          <span class="s1-panel-scene">Situación 3 de ${EXPERIENCE_FLOW.situations.length}</span>
+        </div>
+        <h1>Registrando su dinero</h1>
+        ${content}
+      </div>
+    </section>`;
+};
+
+const flowSituationThreeGiftScreen = () => {
+  const progress = flowSituationThreeData();
+  const selected = progress.answers.s3_regalo_elegido || "";
+  const gifts = SITUATION_THREE_GIFTS.map((gift) => `
+    <button class="s3-gift-option${selected === gift.value ? " selected" : ""}" type="button" role="radio" aria-checked="${selected === gift.value}" aria-label="${gift.accessibleLabel}, $180" data-action="s3-flow-buy-gift" data-gift="${gift.value}" ${progress.giftPurchased ? "disabled" : ""}>
+      <img src="${gift.image}" alt="" /><strong>$180</strong>
+    </button>`).join("");
+  return `
+    <p class="challenge-intro">Elige el regalo que quieres que Tadeo compre para Eloísa.</p>
+    <div class="s3-gift-options" role="radiogroup" aria-label="Tres regalos de $180">${gifts}</div>
+    ${progress.giftPurchased ? `
+      <div class="s3-gift-reward" role="status"><img src="./assets/characters/tadeo-celebrando.png" alt="" /><strong>¡Regalo comprado!</strong></div>
+      <div class="form-actions"><button class="primary-button" type="button" data-action="s3-flow-gift-continue">CONTINUAR</button></div>` : ""}`;
+};
+
+const flowSituationThreeRegisterContextScreen = () => {
+  const saved = flowSituationThreeData().savedOpenStages.includes(1);
+  const missingAmounts = Array.from({ length: 4 }, (_, index) => `
+    <span class="s3-register-row" aria-label="Cantidad ${index + 1} sin registrar">
+      <span class="s3-register-cell">?</span>
+    </span>`).join("");
+  return `
+    <div class="s3-register-context">
+      <img src="./assets/objects/registro-ahorros.png" alt="Registro de dinero de Tadeo" />
+      <div class="s3-register-slots" aria-label="Cuatro cantidades sin registrar">${missingAmounts}</div>
+    </div>
+    <p class="s3-flow-context">Antes de salir, Tadeo había recibido dinero en cuatro ocasiones.<br><br>Las cuatro cantidades que recibió eran iguales, pero olvidó anotarlas en su registro.<br><br>Después de gastar $180 en el regalo, le quedaron $300.</p>
+    <form class="challenge-form s3-flow-form" id="challenge-form" data-flow-situation="3" data-s3-flow-stage="1" novalidate>
+      <label class="field-group"><span class="field-label">¿Qué información falta completar en el registro?</span><textarea class="text-input open-response" name="s3_informacion_faltante" required${saved ? " readonly" : ""}>${flowSituationThreeValue("s3_informacion_faltante")}</textarea></label>
+      <label class="field-group"><span class="field-label">¿Qué necesita averiguar Tadeo?</span><textarea class="text-input open-response" name="s3_que_averiguar" required${saved ? " readonly" : ""}>${flowSituationThreeValue("s3_que_averiguar")}</textarea></label>
+      ${flowSituationThreeOpenActions(1)}
+    </form>`;
+};
+
+const flowSituationThreeFourAmountsScreen = () => {
+  const built = flowSituationThreeData().quantitiesBuilt;
+  const tokens = Array.from({ length: 4 }, () => `<span class="s3-x-token${built ? " placed" : ""}">${built ? "x" : ""}</span>`).join("");
+  return `
+    <p class="challenge-intro">En la papelería utilizamos x para representar una cantidad que todavía no conocíamos.<br><br>Ahora x representará la cantidad de dinero que Tadeo recibió cada vez.</p>
+    <p class="field-label">Representa las cuatro cantidades iguales que recibió Tadeo.</p>
+    <div class="s3-four-amounts" aria-label="Cuatro cantidades iguales">${tokens}</div>
+    ${built ? `
+      <div class="s3-expression-steps"><span>x + x + x + x</span><span aria-hidden="true">→</span><strong>4x</strong></div>
+      <div class="form-actions"><button class="primary-button" type="button" data-action="s3-flow-amounts-continue">CONTINUAR</button></div>`
+      : '<div class="form-actions"><button class="primary-button" type="button" data-action="s3-flow-build-amounts">COLOCAR LAS CUATRO x</button></div>'}`;
+};
+
+const flowSituationThreeExpenseScreen = () => {
+  const progress = flowSituationThreeData();
+  const gift = flowSituationThreeSelectedGift();
+  const saved = progress.savedOpenStages.includes(3);
+  return `
+    <p class="challenge-intro">Agrega al registro el dinero que Tadeo gastó en el regalo.</p>
+    <div class="s3-expense-builder">
+      <strong>4x</strong><span class="s3-expense-minus">−</span>
+      <figure class="s3-expense-gift${progress.expenseAdded ? " added" : ""}"><img src="${gift.image}" alt="Regalo elegido" /><figcaption>$180</figcaption></figure>
+    </div>
+    ${progress.expenseAdded ? `
+      <div class="s1-math-display" aria-label="Cuatro x menos ciento ochenta">4x − 180</div>
+      <form class="challenge-form s3-flow-form" id="challenge-form" data-flow-situation="3" data-s3-flow-stage="3" novalidate>
+        <label class="field-group"><span class="field-label">¿Qué representa 4x - 180 en esta situación? Explícalo con tus palabras.</span><textarea class="text-input open-response" name="s3_significado_4x_menos_180" required${saved ? " readonly" : ""}>${flowSituationThreeValue("s3_significado_4x_menos_180")}</textarea></label>
+        ${flowSituationThreeOpenActions(3)}
+      </form>`
+      : '<div class="form-actions"><button class="primary-button" type="button" data-action="s3-flow-add-expense">AGREGAR $180</button></div>'}`;
+};
+
+const flowSituationThreeEquationScreen = () => {
+  const progress = flowSituationThreeData();
+  const interpretationSaved = progress.savedOpenStages.includes(4);
+  if (!progress.equationCompleted) {
+    return `
+      <p class="challenge-intro">Después de comprar el regalo, Tadeo tiene $300.</p>
+      <p class="field-label">Completa la igualdad para representar lo que ocurrió con el dinero de Tadeo.</p>
+      <form class="challenge-form s3-flow-form" id="challenge-form" data-flow-situation="3" data-s3-flow-stage="4" data-s3-flow-form="right-side" novalidate>
+        <div class="s3-equation-input"><span>4x − 180 =</span><span class="s3-money-field"><span>$</span><input class="text-input" type="number" inputmode="numeric" name="s3_valor_lado_derecho" value="${flowSituationThreeValue("s3_valor_lado_derecho")}" autocomplete="off" required /></span></div>
+        ${flowSituationThreeObjectiveActions("s3_valor_lado_derecho")}
+      </form>`;
+  }
+  return `
+    <p class="challenge-intro">Después de comprar el regalo, Tadeo tiene $300.</p>
+    <div class="s1-math-display" aria-label="Cuatro x menos ciento ochenta es igual a trescientos">4x − 180 = 300</div>
+    <form class="challenge-form s3-flow-form" id="challenge-form" data-flow-situation="3" data-s3-flow-stage="4" data-s3-flow-form="interpretation" novalidate>
+      <label class="field-group"><span class="field-label">¿Cómo se relaciona esta igualdad con lo que ocurrió con el dinero de Tadeo? Explícalo con tus palabras.</span><textarea class="text-input open-response" name="s3_interpretacion_ecuacion" required${interpretationSaved ? " readonly" : ""}>${flowSituationThreeValue("s3_interpretacion_ecuacion")}</textarea></label>
+      ${flowSituationThreeOpenActions(4)}
+    </form>`;
+};
+
+const flowSituationThreeProblemInfo = () => `
+  <button class="s1-problem-info-button" type="button" data-action="s3-show-problem-info">VER INFORMACIÓN DEL PROBLEMA</button>
+  <dialog class="s1-problem-dialog" id="s3-problem-dialog" aria-labelledby="s3-problem-dialog-title">
+    <button class="dialog-close" type="button" data-action="s3-close-problem-info" aria-label="Cerrar">×</button>
+    <div class="dialog-heading"><h2 id="s3-problem-dialog-title">Información del problema</h2><ul class="s2-problem-facts"><li>Cuatro cantidades iguales</li><li>Gasto: $180</li><li>Dinero restante: $300</li></ul></div>
+    <button class="secondary-button" type="button" data-action="s3-close-problem-info">CERRAR</button>
+  </dialog>`;
+
+const flowSituationThreeSolveScreen = () => {
+  const progress = flowSituationThreeData();
+  return `
+    <div class="s1-math-display" aria-label="Cuatro x menos ciento ochenta es igual a trescientos">4x − 180 = 300</div>
+    <p class="challenge-intro">Tadeo necesita saber cuánto dinero recibió cada vez.</p>
+    ${flowSituationThreeProblemInfo()}
+    ${progress.strategySaved ? `
+      <label class="field-group s3-saved-strategy"><span class="field-label">¿Cómo podrías encontrar el valor de x? Puedes utilizar la estrategia que consideres conveniente.</span><textarea class="text-input open-response" readonly>${flowSituationThreeValue("s3_estrategia_resolucion")}</textarea></label>
+      <p class="feedback success" role="status">Respuesta registrada.</p>
+      <form class="challenge-form s3-flow-form" id="challenge-form" data-flow-situation="3" data-s3-flow-stage="5" data-s3-flow-form="value" novalidate>
+        <label class="field-group"><span class="field-label">¿Qué valor encontraste para x?</span><span class="s3-money-field"><span>$</span><input class="text-input" type="number" inputmode="numeric" name="s3_valor_x" value="${flowSituationThreeValue("s3_valor_x")}" autocomplete="off" required /></span></label>
+        ${flowSituationThreeObjectiveActions("s3_valor_x")}
+      </form>` : `
+      <form class="challenge-form s3-flow-form" id="challenge-form" data-flow-situation="3" data-s3-flow-stage="5" data-s3-flow-form="strategy" novalidate>
+        <label class="field-group"><span class="field-label">¿Cómo podrías encontrar el valor de x? Puedes utilizar la estrategia que consideres conveniente.</span><textarea class="text-input open-response s3-strategy-response" name="s3_estrategia_resolucion" required>${flowSituationThreeValue("s3_estrategia_resolucion")}</textarea></label>
+        <div class="form-actions"><button class="primary-button" type="submit">GUARDAR RESPUESTA</button></div>
+      </form>`}`;
+};
+
+const flowSituationThreeCheckScreen = () => {
+  const selected = flowSituationThreeData().answers.s3_comprobacion_igualdad || "";
+  return `
+    <p class="challenge-intro">Comprueba tu resultado sustituyendo el valor encontrado.</p>
+    <div class="s3-check-sequence" aria-label="Comprobación del dinero recibido"><span>4(120) − 180 = 300</span><span>480 − 180 = 300</span><strong>300 = 300</strong></div>
+    <form class="challenge-form s3-flow-form" id="challenge-form" data-flow-situation="3" data-s3-flow-stage="6" novalidate>
+      <fieldset class="field-group"><legend>¿Ambos lados representan la misma cantidad?</legend><div class="answer-grid two-options">
+        <label class="answer-choice"><input type="radio" name="s3_comprobacion_igualdad" value="Sí" ${selected === "Sí" ? "checked" : ""} required /><span>Sí</span></label>
+        <label class="answer-choice"><input type="radio" name="s3_comprobacion_igualdad" value="No" ${selected === "No" ? "checked" : ""} required /><span>No</span></label>
+      </div></fieldset>
+      ${flowSituationThreeObjectiveActions("s3_comprobacion_igualdad")}
+    </form>`;
+};
+
+const flowSituationThreeCompleteRegisterScreen = () => {
+  const completed = flowSituationThreeData().registerCompleted;
+  const slots = Array.from({ length: 4 }, (_, index) => `
+    <span class="s3-register-row" aria-label="Cantidad ${index + 1}">
+      <span class="s3-register-cell s3-register-entry${completed ? " completed" : ""}">${completed ? "$120" : ""}</span>
+    </span>`).join("");
+  return `
+    <p class="challenge-intro">Completa las cantidades que faltaban en el registro de Tadeo.</p>
+    <div class="s3-register-completion"><img src="./assets/objects/registro-ahorros.png" alt="Registro de dinero de Tadeo" /><div class="s3-register-entry-grid">${slots}</div></div>
+    ${completed ? `
+      <div class="s3-register-reward" role="status"><img src="./assets/characters/tadeo-celebrando.png" alt="" /><strong>¡Registro completado!</strong></div>
+      <div class="form-actions"><button class="primary-button" type="button" data-action="s3-flow-register-continue">CONTINUAR</button></div>`
+      : '<div class="form-actions"><button class="primary-button" type="button" data-action="s3-flow-complete-register">REGISTRAR $120 EN LAS CUATRO POSICIONES</button></div>'}`;
+};
+
+const renderFlowSituationThree = (situation) => {
+  const stageIndex = Math.min(situation.screenCount - 1, Math.max(0, flowProgress.currentScreen - situation.startScreen));
+  const screens = [
+    flowSituationThreeGiftScreen,
+    flowSituationThreeRegisterContextScreen,
+    flowSituationThreeFourAmountsScreen,
+    flowSituationThreeExpenseScreen,
+    flowSituationThreeEquationScreen,
+    flowSituationThreeSolveScreen,
+    flowSituationThreeCheckScreen,
+    flowSituationThreeCompleteRegisterScreen,
+  ];
+  const screen = flowSituationScreen(3, stageIndex);
+  progressBar.style.width = `${Math.round(((screen - 1) / (EXPERIENCE_FLOW.totalScreens - 1)) * 100)}%`;
+  app.innerHTML = flowSituationThreePanel(screen, screens[stageIndex](), `s3-flow-screen-${stageIndex}`);
+};
+
+const renderFlowSituation = (situation) => {
+  if (situation.id === 1) {
+    renderFlowSituationOne(situation);
+    return;
+  }
+  if (situation.id === 2) {
+    renderFlowSituationTwo(situation);
+    return;
+  }
+  if (situation.id === 3) {
+    renderFlowSituationThree(situation);
+    return;
+  }
+  progressBar.style.width = `${Math.round(((situation.startScreen - 1) / (EXPERIENCE_FLOW.totalScreens - 1)) * 100)}%`;
+  app.innerHTML = flowPanel(
+    situation.startScreen,
+    `Situación ${situation.id} de ${EXPERIENCE_FLOW.situations.length}`,
+    situation.title,
+    '<p class="challenge-intro">Contenido reservado para el siguiente bloque de implementación.</p>',
+  );
+};
+
+const renderCompletedAgenda = () => {
+  app.innerHTML = flowPanel(
+    EXPERIENCE_FLOW.screens.completedAgenda,
+    "Agenda completada",
+    "La agenda de Tadeo",
+    `<p class="s1-dialogue-line">¡Listo! Ya terminé todas mis actividades de hoy.</p>
+    <div class="s3-agenda-celebration" aria-hidden="true"><img src="./assets/characters/tadeo-celebrando.png" alt="" /></div>
+    <div class="two-activity-agenda completed s3-completed-agenda" aria-label="Agenda con las dos actividades completadas">
+      <div class="two-activity-agenda-heading"><span aria-hidden="true">★</span><strong>Plan de la tarde</strong><span aria-hidden="true">★</span></div>
+      <ul class="two-activity-agenda-list">
+        <li class="done"><span class="s2-agenda-check" aria-hidden="true">☑</span><span>Ir a la papelería a comprar 5 cuadernos y un paquete de colores.</span></li>
+        <li class="done"><span class="s2-agenda-check" aria-hidden="true">☑</span><span>Comprar un regalo para Eloísa.</span></li>
+      </ul>
+    </div>
+    <div class="form-actions">
+      ${isReviewMode
+        ? '<button class="primary-button" type="button" data-action="s3-flow-restart-review">VOLVER A RECORRER LA SITUACIÓN</button>'
+        : '<button class="primary-button" type="button" data-action="open-flow-closing">CONTINUAR</button>'}
+    </div>`,
+    "flow-completed-agenda-screen",
+  );
+};
+
+const renderFlowClosing = () => {
+  app.innerHTML = flowPanel(
+    EXPERIENCE_FLOW.screens.closing,
+    "Recorrido completado",
+    "DÍA COMPLETADO",
+    `<div class="flow-closing-confetti" aria-hidden="true">${Array.from({ length: 16 }, (_, index) => `<span style="--confetti-index:${index}"></span>`).join("")}</div>
+    <div class="flow-closing-layout">
+      <div class="flow-closing-copy">
+        <p class="flow-closing-message">¡Ayudaste a Tadeo a completar todas las actividades de su agenda!</p>
+        <div class="flow-completion-badges" aria-label="Actividades completadas">
+          <span><img src="./assets/objects/icono_papeleria.png" alt="" />Papelería completada</span>
+          <span><img src="./assets/objects/icono_regalo.png" alt="" />Regalo completado</span>
+        </div>
+        <div class="flow-completion-meter" aria-label="Recorrido completado al 100 por ciento">
+          <div><strong>RECORRIDO COMPLETADO</strong><span>100%</span></div>
+          <div class="flow-completion-track"><span></span></div>
+        </div>
+      </div>
+      <div class="flow-closing-visual" aria-hidden="true">
+        <img class="flow-closing-tadeo" src="./assets/characters/tadeo-celebrando.png" alt="" />
+        <img class="flow-closing-agenda" src="./assets/objects/agenda-cerrada.png" alt="" />
+      </div>
+    </div>
+    <div class="form-actions"><button class="primary-button" type="button" data-action="open-final-screen">CONTINUAR</button></div>`,
+    "flow-closing-screen",
+  );
+};
+
+const renderFlowFinalization = () => {
+  progressBar.style.width = "100%";
+  app.innerHTML = flowPanel(
+    EXPERIENCE_FLOW.screens.finalization,
+    "Finalización",
+    "¡Terminaste el recorrido de Tadeo!",
+    `<div class="flow-finalization-card">
+      <img src="./assets/characters/tadeo-celebrando.png" alt="Tadeo celebra que completó su recorrido" />
+      <p>Tus respuestas han sido registradas.</p>
+    </div>
+    <div class="form-actions flow-finalization-actions">${finalScreenControls()}</div>`,
+    "flow-finalization-screen",
+  );
+};
+
 const render = () => {
   updateChrome();
   document.body.dataset.view = introPhase;
   if (!researchSession && introPhase === "access") renderAccess();
   else if (!researchSession) renderHome();
   else if (introPhase === "home") renderHome();
-  else if (situationFiveReviewRequested) renderSituationFive();
-  else if (situationFourReviewRequested) renderSituationFour();
-  else if (situationThreeReviewRequested) renderSituationThree();
   else if (introPhase === "presentation") renderPresentation();
   else if (introPhase === "agenda") renderInitialAgenda();
-  else if (situationOneReviewRequested) {
-    situationOneProgress.stage = Math.min(situationOneProgress.stage, 6);
-    renderSituationOne();
-  }
-  else if (!isReviewMode && finalFlow.screen === 54) renderFinalNarrative();
-  else if (!isReviewMode && finalFlow.screen >= 55) renderFinalScreen();
-  else if (situationThreeProgress.stage === 9 && !hasSituationFourProgress) renderSituationThree();
-  else if (hasSituationFiveProgress) renderSituationFive();
-  else if (hasSituationFourProgress) renderSituationFour();
-  else if (state.currentScene === 0 || (hasSituationOneProgress && situationOneProgress.stage < 7)) renderSituationOne();
-  else if (state.currentScene === 2 && hasSituationThreeProgress) renderSituationThree();
-  else if (state.currentScene === 3) renderSituationFour();
-  else if (state.currentScene === 1 || (situationTwoProgress.stage === 8 && !hasSituationThreeProgress)) renderSituationTwo();
-  else if (state.currentScene === 4) {
-    ensureSituationFiveProgress();
-    renderSituationFive();
-  }
-  else if (state.currentScene >= scenes.length && researchSession.experienceVersion !== EXPERIENCE_VERSION) renderFinish();
-  else renderScene();
+  else if (!isReviewMode && finalFlow.screen === EXPERIENCE_FLOW.screens.closing) renderFlowClosing();
+  else if (!isReviewMode && finalFlow.screen >= EXPERIENCE_FLOW.screens.finalization) renderFlowFinalization();
+  else if (flowProgress.currentScreen === EXPERIENCE_FLOW.screens.completedAgenda) renderCompletedAgenda();
+  else if (flowProgress.currentScreen === EXPERIENCE_FLOW.screens.closing) renderFlowClosing();
+  else if (flowProgress.currentScreen === EXPERIENCE_FLOW.screens.finalization) renderFlowFinalization();
+  else renderFlowSituation(
+    situationForScreen(flowProgress.currentScreen)
+      || EXPERIENCE_FLOW.situations.find(({ id }) => id === reviewSituation)
+      || EXPERIENCE_FLOW.situations[0],
+  );
   app.focus({ preventScroll: true });
 };
 
@@ -3002,7 +3966,7 @@ const setFinalFlowStatus = (status, error = "") => {
 };
 
 const synchronizeFinalScreen = async () => {
-  if (isReviewMode || finalFlow.screen !== 55 || researchSession?.completedAt) return;
+  if (isReviewMode || finalFlow.screen !== EXPERIENCE_FLOW.screens.finalization || researchSession?.completedAt) return;
   setFinalFlowStatus("syncing");
   render();
   collectActiveSlice();
@@ -3018,7 +3982,7 @@ const synchronizeFinalScreen = async () => {
 };
 
 const restoreFinalScreenState = async () => {
-  if (isReviewMode || finalFlow.screen !== 55) return;
+  if (isReviewMode || finalFlow.screen !== EXPERIENCE_FLOW.screens.finalization) return;
   if (researchSession?.completedAt) {
     outbox = outbox.filter(
       (item) => !(item.type === "complete" && item.sessionId === researchSession.id),
@@ -3041,7 +4005,7 @@ const restoreFinalScreenState = async () => {
 const finalizeSession = async () => {
   if (
     isReviewMode
-    || finalFlow.screen !== 55
+    || finalFlow.screen !== EXPERIENCE_FLOW.screens.finalization
     || researchSession?.completedAt
     || ["syncing", "completing", "completed"].includes(finalFlow.completionStatus)
   ) return;
@@ -3121,24 +4085,20 @@ const startSession = async (code, allowResume = true, forceNew = false) => {
   saveOutbox();
   saveResearchSession();
   applyServerState(data.state);
-  loadSituationOneProgress();
-  loadSituationTwoProgress();
-  loadSituationThreeProgress();
-  loadSituationFourProgress();
-  loadSituationFiveProgress();
+  loadFlowProgress();
   if (pendingRevision > (Number(data.state.progress_revision) || 0)) {
     applyProgressSnapshot(pendingProgress.payload.progress_snapshot);
   } else if ((Number(data.state.progress_revision) || 0) >= previousRevision) {
     applyProgressSnapshot(data.state.progress_snapshot);
   }
   if (researchSession.completedAt) {
-    finalFlow.screen = 55;
+    finalFlow.screen = EXPERIENCE_FLOW.screens.finalization;
     finalFlow.completionStatus = "completed";
     finalFlow.completionError = "";
     saveFinalFlow();
   }
   beginActivityTracking();
-  if (finalFlow.screen === 55) await restoreFinalScreenState();
+  if (finalFlow.screen === EXPERIENCE_FLOW.screens.finalization) await restoreFinalScreenState();
   else flushOutbox();
 };
 
@@ -3579,6 +4539,256 @@ const submitSituationFiveStage = (form, stageIndex) => {
   window.scrollTo({ top: 0, behavior: "smooth" });
 };
 
+const advanceFlowSituationOne = (stageIndex) => {
+  flowProgress.currentScreen = flowSituationScreen(1, stageIndex + 1);
+  saveFlowProgress();
+  render();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+const submitFlowSituationOneStage = (form, stageIndex) => {
+  const originalAnswers = Object.fromEntries(new FormData(form).entries());
+  const progress = flowSituationOneData();
+  progress.answers = { ...progress.answers, ...originalAnswers };
+
+  if (stageIndex === 2) {
+    collectActiveSlice();
+    queueResponseSubmission({
+      situation: 1,
+      screen: flowSituationScreen(1, stageIndex),
+      activityId: "s1_significados",
+      answers: originalAnswers,
+    });
+    if (!progress.savedOpenStages.includes(stageIndex)) progress.savedOpenStages.push(stageIndex);
+    saveFlowProgress();
+    render();
+    return;
+  }
+
+  const objectiveStages = {
+    0: {
+      activityId: "s1_contexto",
+      expected: {
+        s1_tiempo_total: "60",
+        s1_numero_actividades: "2",
+        s1_tiempo_por_actividad: "30",
+      },
+    },
+    1: {
+      activityId: "s1_distribucion",
+      expected: {
+        s1_igualdad_valor_1: "30",
+        s1_igualdad_valor_2: "30",
+      },
+    },
+    3: {
+      activityId: "s1_misma_cantidad",
+      expected: { s1_misma_cantidad: "Sí" },
+    },
+  };
+  const objective = objectiveStages[stageIndex];
+  if (!objective) return;
+  const attempts = flowSituationOneAttempts(objective.activityId);
+  if (attempts.length >= 2) return;
+  const fieldValidation = Object.fromEntries(
+    Object.entries(objective.expected).map(([fieldId, expected]) => [
+      fieldId,
+      String(originalAnswers[fieldId] || "").trim() === expected,
+    ]),
+  );
+  const validationResult = Object.values(fieldValidation).every(Boolean);
+  attempts.push({ answers: { ...originalAnswers }, correct: validationResult });
+  progress.objectiveAttempts[objective.activityId] = attempts;
+  collectActiveSlice();
+  queueResponseSubmission({
+    situation: 1,
+    screen: flowSituationScreen(1, stageIndex),
+    activityId: objective.activityId,
+    answers: originalAnswers,
+    validationResult,
+    fieldValidation,
+  });
+  if (validationResult) {
+    advanceFlowSituationOne(stageIndex);
+    return;
+  }
+  saveFlowProgress();
+  render();
+};
+
+const advanceFlowSituationTwo = (stageIndex) => {
+  flowProgress.currentScreen = flowSituationScreen(2, stageIndex + 1);
+  saveFlowProgress();
+  render();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+const submitFlowSituationTwoStage = (form, stageIndex) => {
+  const originalAnswers = Object.fromEntries(new FormData(form).entries());
+  const progress = flowSituationTwoData();
+  progress.answers = { ...progress.answers, ...originalAnswers };
+
+  if (form.dataset.s2FlowForm === "strategy") {
+    collectActiveSlice();
+    queueResponseSubmission({
+      situation: 2,
+      screen: flowSituationScreen(2, stageIndex),
+      activityId: "s2_estrategia_resolucion",
+      answers: originalAnswers,
+    });
+    progress.strategySaved = true;
+    saveFlowProgress();
+    render();
+    return;
+  }
+
+  const openStages = {
+    0: "s2_contexto",
+    1: "s2_simbolo",
+    4: "s2_representacion_breve",
+  };
+  if (Object.hasOwn(openStages, stageIndex)) {
+    collectActiveSlice();
+    queueResponseSubmission({
+      situation: 2,
+      screen: flowSituationScreen(2, stageIndex),
+      activityId: openStages[stageIndex],
+      answers: originalAnswers,
+    });
+    if (!progress.savedOpenStages.includes(stageIndex)) progress.savedOpenStages.push(stageIndex);
+    saveFlowProgress();
+    render();
+    return;
+  }
+
+  const objectiveStages = {
+    3: { activityId: "s2_signo_relacion", expected: { s2_signo_relacion: "=" } },
+    6: { activityId: "s2_valor_x", expected: { s2_valor_x: "40" } },
+    7: { activityId: "s2_cuaderno_elegido", expected: { s2_cuaderno_elegido: "Cuaderno B — $40" } },
+    8: { activityId: "s2_comprobacion_igualdad", expected: { s2_comprobacion_igualdad: "Sí" } },
+  };
+  const objective = objectiveStages[stageIndex];
+  if (!objective) return;
+  const attempts = flowSituationTwoAttempts(objective.activityId);
+  if (attempts.length >= 2) return;
+  const fieldValidation = Object.fromEntries(
+    Object.entries(objective.expected).map(([fieldId, expected]) => [
+      fieldId,
+      String(originalAnswers[fieldId] || "").trim() === expected,
+    ]),
+  );
+  const validationResult = Object.values(fieldValidation).every(Boolean);
+  attempts.push({ answers: { ...originalAnswers }, correct: validationResult });
+  progress.objectiveAttempts[objective.activityId] = attempts;
+  collectActiveSlice();
+  queueResponseSubmission({
+    situation: 2,
+    screen: flowSituationScreen(2, stageIndex),
+    activityId: objective.activityId,
+    answers: originalAnswers,
+    validationResult,
+    fieldValidation,
+  });
+  if (validationResult) {
+    if (stageIndex === 8) {
+      progress.activityCompleted = true;
+      saveFlowProgress();
+      render();
+      return;
+    }
+    advanceFlowSituationTwo(stageIndex);
+    return;
+  }
+  saveFlowProgress();
+  render();
+};
+
+const advanceFlowSituationThree = (stageIndex) => {
+  flowProgress.currentScreen = flowSituationScreen(3, stageIndex + 1);
+  saveFlowProgress();
+  render();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+const submitFlowSituationThreeStage = (form, stageIndex) => {
+  const originalAnswers = Object.fromEntries(new FormData(form).entries());
+  const progress = flowSituationThreeData();
+  progress.answers = { ...progress.answers, ...originalAnswers };
+
+  if (form.dataset.s3FlowForm === "strategy") {
+    collectActiveSlice();
+    queueResponseSubmission({
+      situation: 3,
+      screen: flowSituationScreen(3, stageIndex),
+      activityId: "s3_estrategia_resolucion",
+      answers: originalAnswers,
+    });
+    progress.strategySaved = true;
+    saveFlowProgress();
+    render();
+    return;
+  }
+
+  const openForms = {
+    1: "s3_contexto_registro",
+    3: "s3_significado_4x_menos_180",
+  };
+  const isInterpretation = stageIndex === 4 && form.dataset.s3FlowForm === "interpretation";
+  if (Object.hasOwn(openForms, stageIndex) || isInterpretation) {
+    collectActiveSlice();
+    queueResponseSubmission({
+      situation: 3,
+      screen: flowSituationScreen(3, stageIndex),
+      activityId: isInterpretation ? "s3_interpretacion_ecuacion" : openForms[stageIndex],
+      answers: originalAnswers,
+    });
+    if (!progress.savedOpenStages.includes(stageIndex)) progress.savedOpenStages.push(stageIndex);
+    saveFlowProgress();
+    render();
+    return;
+  }
+
+  const objectiveStages = {
+    4: { activityId: "s3_valor_lado_derecho", expected: { s3_valor_lado_derecho: "300" } },
+    5: { activityId: "s3_valor_x", expected: { s3_valor_x: "120" } },
+    6: { activityId: "s3_comprobacion_igualdad", expected: { s3_comprobacion_igualdad: "Sí" } },
+  };
+  const objective = objectiveStages[stageIndex];
+  if (!objective) return;
+  const attempts = flowSituationThreeAttempts(objective.activityId);
+  if (attempts.length >= 2) return;
+  const fieldValidation = Object.fromEntries(
+    Object.entries(objective.expected).map(([fieldId, expected]) => [
+      fieldId,
+      String(originalAnswers[fieldId] || "").trim() === expected,
+    ]),
+  );
+  const validationResult = Object.values(fieldValidation).every(Boolean);
+  attempts.push({ answers: { ...originalAnswers }, correct: validationResult });
+  progress.objectiveAttempts[objective.activityId] = attempts;
+  collectActiveSlice();
+  queueResponseSubmission({
+    situation: 3,
+    screen: flowSituationScreen(3, stageIndex),
+    activityId: objective.activityId,
+    answers: originalAnswers,
+    validationResult,
+    fieldValidation,
+  });
+  if (validationResult) {
+    if (stageIndex === 4) {
+      progress.equationCompleted = true;
+      saveFlowProgress();
+      render();
+      return;
+    }
+    advanceFlowSituationThree(stageIndex);
+    return;
+  }
+  saveFlowProgress();
+  render();
+};
+
 document.addEventListener("submit", async (event) => {
   if (event.target.id === "participant-access-form") {
     event.preventDefault();
@@ -3605,6 +4815,18 @@ document.addEventListener("submit", async (event) => {
   const form = event.target;
   if (!form.checkValidity()) {
     form.reportValidity();
+    return;
+  }
+  if (form.dataset.flowSituation === "1") {
+    submitFlowSituationOneStage(form, Number(form.dataset.s1FlowStage));
+    return;
+  }
+  if (form.dataset.flowSituation === "2") {
+    submitFlowSituationTwoStage(form, Number(form.dataset.s2FlowStage));
+    return;
+  }
+  if (form.dataset.flowSituation === "3") {
+    submitFlowSituationThreeStage(form, Number(form.dataset.s3FlowStage));
     return;
   }
   if (form.dataset.s1Stage) {
@@ -3685,6 +4907,24 @@ document.addEventListener("click", (event) => {
 document.addEventListener("input", (event) => {
   const field = event.target;
   if (!field.name || (field.type === "radio" && !field.checked)) return;
+  const flowSituationOneForm = field.closest('form[data-flow-situation="1"]');
+  if (flowSituationOneForm) {
+    flowSituationOneData().answers[field.name] = field.value;
+    persistProgressCaches();
+    return;
+  }
+  const flowSituationTwoForm = field.closest('form[data-flow-situation="2"]');
+  if (flowSituationTwoForm) {
+    flowSituationTwoData().answers[field.name] = field.value;
+    persistProgressCaches();
+    return;
+  }
+  const flowSituationThreeForm = field.closest('form[data-flow-situation="3"]');
+  if (flowSituationThreeForm) {
+    flowSituationThreeData().answers[field.name] = field.value;
+    persistProgressCaches();
+    return;
+  }
   const situationThreeForm = field.closest("form[data-s3-stage]");
   if (situationThreeForm) {
     situationThreeProgress.answers[field.name] = field.value;
@@ -3754,7 +4994,262 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (action === "start-game") {
+    flowProgress.currentScreen = EXPERIENCE_FLOW.situations[0].startScreen;
     setIntroPhase("game");
+    persistProgressCaches();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s1-show-problem-info") {
+    document.querySelector("#s1-problem-dialog")?.showModal();
+    return;
+  }
+  if (action === "s1-close-problem-info") {
+    actionElement.closest("dialog")?.close();
+    return;
+  }
+  if (action === "s1-continue-after-attempts") {
+    const stageIndex = flowProgress.currentScreen - flowSituation(1).startScreen;
+    const activityIds = { 0: "s1_contexto", 1: "s1_distribucion", 3: "s1_misma_cantidad" };
+    const attempts = flowSituationOneAttempts(activityIds[stageIndex]);
+    if (attempts.length < 2 || attempts.some(({ correct }) => correct)) return;
+    advanceFlowSituationOne(stageIndex);
+    return;
+  }
+  if (action === "s1-open-response-continue") {
+    const progress = flowSituationOneData();
+    if (!progress.savedOpenStages.includes(2)) return;
+    advanceFlowSituationOne(2);
+    return;
+  }
+  if (action === "s1-discovery-continue") {
+    flowProgress.currentScreen = flowSituationScreen(1, 5);
+    saveFlowProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s1-go-papeleria") {
+    flowProgress.completedSituations = [...new Set([...flowProgress.completedSituations, 1])];
+    flowProgress.currentScreen = flowSituation(2).startScreen;
+    state.completedScenes = [...flowProgress.completedSituations];
+    state.unlocked = [...flowProgress.completedSituations];
+    saveFlowProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s2-show-problem-info") {
+    document.querySelector("#s2-problem-dialog")?.showModal();
+    return;
+  }
+  if (action === "s2-close-problem-info") {
+    actionElement.closest("dialog")?.close();
+    return;
+  }
+  if (action === "s2-flow-select-symbol") {
+    const progress = flowSituationTwoData();
+    if (progress.savedOpenStages.includes(1)) return;
+    progress.answers.s2_simbolo_elegido = actionElement.dataset.symbol;
+    persistProgressCaches();
+    render();
+    return;
+  }
+  if (action === "s2-flow-open-continue") {
+    const stageIndex = flowProgress.currentScreen - flowSituation(2).startScreen;
+    if (!flowSituationTwoData().savedOpenStages.includes(stageIndex)) return;
+    advanceFlowSituationTwo(stageIndex);
+    return;
+  }
+  if (action === "s2-flow-assign-notebooks") {
+    const progress = flowSituationTwoData();
+    if (!flowSituationTwoSymbol() || progress.notebooksAssigned) return;
+    const literal = Array(5).fill(flowSituationTwoSymbol()).join(" + ");
+    progress.answers.s2_representacion_cinco_cuadernos = literal;
+    progress.notebooksAssigned = true;
+    collectActiveSlice();
+    queueResponseSubmission({
+      situation: 2,
+      screen: flowSituationScreen(2, 2),
+      activityId: "s2_representacion_cinco_cuadernos",
+      answers: { s2_representacion_cinco_cuadernos: literal },
+    });
+    saveFlowProgress();
+    render();
+    return;
+  }
+  if (action === "s2-flow-notebooks-continue") {
+    if (!flowSituationTwoData().notebooksAssigned) return;
+    advanceFlowSituationTwo(2);
+    return;
+  }
+  if (action === "s2-flow-add-colors") {
+    flowSituationTwoData().colorsAdded = true;
+    saveFlowProgress();
+    render();
+    return;
+  }
+  if (action === "s2-flow-continue-after-attempts") {
+    const stageIndex = flowProgress.currentScreen - flowSituation(2).startScreen;
+    const activityIds = {
+      3: "s2_signo_relacion",
+      6: "s2_valor_x",
+      7: "s2_cuaderno_elegido",
+      8: "s2_comprobacion_igualdad",
+    };
+    const attempts = flowSituationTwoAttempts(activityIds[stageIndex]);
+    if (attempts.length < 2 || attempts.some(({ correct }) => correct)) return;
+    if (stageIndex === 8) {
+      flowSituationTwoData().activityCompleted = true;
+      saveFlowProgress();
+      render();
+      return;
+    }
+    advanceFlowSituationTwo(stageIndex);
+    return;
+  }
+  if (action === "s2-flow-discovery-continue") {
+    flowProgress.currentScreen = flowSituationScreen(2, 6);
+    saveFlowProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s2-flow-reward-continue") {
+    if (!flowSituationTwoData().activityCompleted) return;
+    flowProgress.completedActivities = [...new Set([...flowProgress.completedActivities, 0])];
+    advanceFlowSituationTwo(8);
+    return;
+  }
+  if (action === "s2-flow-go-store") {
+    flowProgress.completedSituations = [...new Set([...flowProgress.completedSituations, 2])];
+    flowProgress.completedActivities = [...new Set([...flowProgress.completedActivities, 0])];
+    flowProgress.currentScreen = flowSituation(3).startScreen;
+    state.completedScenes = [...flowProgress.completedSituations];
+    state.unlocked = [...flowProgress.completedSituations];
+    saveFlowProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s3-flow-buy-gift") {
+    const progress = flowSituationThreeData();
+    if (progress.giftPurchased) return;
+    progress.answers.s3_regalo_elegido = actionElement.dataset.gift;
+    progress.giftPurchased = true;
+    collectActiveSlice();
+    queueResponseSubmission({
+      situation: 3,
+      screen: flowSituationScreen(3, 0),
+      activityId: "s3_regalo_elegido",
+      answers: { s3_regalo_elegido: actionElement.dataset.gift },
+    });
+    saveFlowProgress();
+    render();
+    return;
+  }
+  if (action === "s3-flow-gift-continue") {
+    if (!flowSituationThreeData().giftPurchased) return;
+    advanceFlowSituationThree(0);
+    return;
+  }
+  if (action === "s3-flow-open-continue") {
+    const stageIndex = flowProgress.currentScreen - flowSituation(3).startScreen;
+    if (!flowSituationThreeData().savedOpenStages.includes(stageIndex)) return;
+    advanceFlowSituationThree(stageIndex);
+    return;
+  }
+  if (action === "s3-flow-build-amounts") {
+    const progress = flowSituationThreeData();
+    if (progress.quantitiesBuilt) return;
+    const literal = "x + x + x + x = 4x";
+    progress.quantitiesBuilt = true;
+    progress.answers.s3_representacion_cuatro_cantidades = literal;
+    collectActiveSlice();
+    queueResponseSubmission({
+      situation: 3,
+      screen: flowSituationScreen(3, 2),
+      activityId: "s3_representacion_cuatro_cantidades",
+      answers: { s3_representacion_cuatro_cantidades: literal },
+    });
+    saveFlowProgress();
+    render();
+    return;
+  }
+  if (action === "s3-flow-amounts-continue") {
+    if (!flowSituationThreeData().quantitiesBuilt) return;
+    advanceFlowSituationThree(2);
+    return;
+  }
+  if (action === "s3-flow-add-expense") {
+    flowSituationThreeData().expenseAdded = true;
+    saveFlowProgress();
+    render();
+    return;
+  }
+  if (action === "s3-show-problem-info") {
+    document.querySelector("#s3-problem-dialog")?.showModal();
+    return;
+  }
+  if (action === "s3-close-problem-info") {
+    actionElement.closest("dialog")?.close();
+    return;
+  }
+  if (action === "s3-flow-continue-after-attempts") {
+    const stageIndex = flowProgress.currentScreen - flowSituation(3).startScreen;
+    const activityIds = {
+      4: "s3_valor_lado_derecho",
+      5: "s3_valor_x",
+      6: "s3_comprobacion_igualdad",
+    };
+    const attempts = flowSituationThreeAttempts(activityIds[stageIndex]);
+    if (attempts.length < 2 || attempts.some(({ correct }) => correct)) return;
+    if (stageIndex === 4) {
+      flowSituationThreeData().equationCompleted = true;
+      saveFlowProgress();
+      render();
+      return;
+    }
+    advanceFlowSituationThree(stageIndex);
+    return;
+  }
+  if (action === "s3-flow-complete-register") {
+    const progress = flowSituationThreeData();
+    if (progress.registerCompleted) return;
+    const literal = "$120 | $120 | $120 | $120";
+    progress.registerCompleted = true;
+    progress.answers.s3_registro_completado = literal;
+    collectActiveSlice();
+    queueResponseSubmission({
+      situation: 3,
+      screen: flowSituationScreen(3, 7),
+      activityId: "s3_registro_completado",
+      answers: { s3_registro_completado: literal },
+    });
+    saveFlowProgress();
+    render();
+    return;
+  }
+  if (action === "s3-flow-register-continue") {
+    if (!flowSituationThreeData().registerCompleted) return;
+    flowProgress.completedSituations = [...new Set([...flowProgress.completedSituations, 3])];
+    flowProgress.completedActivities = [...new Set([...flowProgress.completedActivities, 1])];
+    flowProgress.currentScreen = EXPERIENCE_FLOW.screens.completedAgenda;
+    state.completedScenes = [...flowProgress.completedSituations];
+    state.unlocked = [...flowProgress.completedSituations];
+    saveFlowProgress();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "s3-flow-restart-review") {
+    if (!isReviewMode || reviewSituation !== 3) return;
+    flowProgress.situationData[3] = createDefaultFlowProgress().situationData[3];
+    flowProgress.currentScreen = flowSituation(3).startScreen;
+    state.currentScene = 2;
+    state.completedScenes = [];
+    state.unlocked = [];
     render();
     window.scrollTo({ top: 0, behavior: "smooth" });
     return;
@@ -3846,7 +5341,17 @@ document.addEventListener("click", async (event) => {
   }
   if (action === "open-final-narrative") {
     if (isReviewMode || situationFiveProgress.stage !== 11) return;
-    finalFlow.screen = 54;
+    finalFlow.screen = EXPERIENCE_FLOW.screens.closing;
+    setFinalFlowStatus("idle");
+    queueProgressSnapshot();
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+  if (action === "open-flow-closing") {
+    if (isReviewMode || flowProgress.currentScreen !== EXPERIENCE_FLOW.screens.completedAgenda) return;
+    collectActiveSlice();
+    finalFlow.screen = EXPERIENCE_FLOW.screens.closing;
     setFinalFlowStatus("idle");
     queueProgressSnapshot();
     render();
@@ -3854,9 +5359,9 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (action === "open-final-screen") {
-    if (isReviewMode || finalFlow.screen !== 54) return;
+    if (isReviewMode || finalFlow.screen !== EXPERIENCE_FLOW.screens.closing) return;
     collectActiveSlice();
-    finalFlow.screen = 55;
+    finalFlow.screen = EXPERIENCE_FLOW.screens.finalization;
     ensureCompletionEventId();
     setFinalFlowStatus("syncing");
     queueProgressSnapshot();
@@ -4017,17 +5522,14 @@ const initialize = async () => {
       completedAt: null,
     };
     introPhase = "game";
+    flowProgress = createDefaultFlowProgress();
+    flowProgress.currentScreen = EXPERIENCE_FLOW.situations.find(({ id }) => id === reviewSituation).startScreen;
     state = {
       ...defaultState,
       currentScene: reviewSituation - 1,
-      completedScenes: Array.from({ length: Math.max(0, reviewSituation - 1) }, (_, index) => index),
-      unlocked: Array.from({ length: Math.max(0, reviewSituation - 1) }, (_, index) => index),
+      completedScenes: [],
+      unlocked: [],
     };
-    loadSituationOneProgress();
-    loadSituationTwoProgress();
-    loadSituationThreeProgress();
-    loadSituationFourProgress();
-    loadSituationFiveProgress();
     render();
     return;
   }
@@ -4039,11 +5541,7 @@ const initialize = async () => {
   }
   renderLoading();
   const localRevision = Number(researchSession.progressRevision) || 0;
-  loadSituationOneProgress();
-  loadSituationTwoProgress();
-  loadSituationThreeProgress();
-  loadSituationFourProgress();
-  loadSituationFiveProgress();
+  loadFlowProgress();
   const pendingProgress = [...outbox].reverse().find(
     (item) => item.type === "progress" && item.sessionId === researchSession.id,
   );
@@ -4063,7 +5561,7 @@ const initialize = async () => {
       applyProgressSnapshot(data.state.progress_snapshot);
     }
     if (researchSession.completedAt) {
-      finalFlow.screen = 55;
+      finalFlow.screen = EXPERIENCE_FLOW.screens.finalization;
       finalFlow.completionStatus = "completed";
       finalFlow.completionError = "";
     }
@@ -4071,7 +5569,7 @@ const initialize = async () => {
     saveResearchSession();
     beginActivityTracking();
     render();
-    if (finalFlow.screen === 55) await restoreFinalScreenState();
+    if (finalFlow.screen === EXPERIENCE_FLOW.screens.finalization) await restoreFinalScreenState();
     else flushOutbox();
   } catch (error) {
     if (error.status === 401 || error.status === 404) {
@@ -4083,10 +5581,11 @@ const initialize = async () => {
       return;
     }
     introPhase = researchSession.introPhase || "game";
-    state.currentScene = sceneForScreen(currentScreenForProgress());
+    const currentSituation = situationForScreen(currentScreenForProgress());
+    state.currentScene = currentSituation ? currentSituation.id - 1 : 0;
     beginActivityTracking();
     render();
-    if (finalFlow.screen === 55) await restoreFinalScreenState();
+    if (finalFlow.screen === EXPERIENCE_FLOW.screens.finalization) await restoreFinalScreenState();
   }
 };
 

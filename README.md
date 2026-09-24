@@ -1,202 +1,105 @@
 # El día de Tadeo
 
-Aplicación web educativa con backend FastAPI, PostgreSQL y bóveda de Obsidian para un videojuego sobre ecuaciones de primer grado.
+Aplicación web educativa con frontend HTML/CSS/JavaScript, backend FastAPI y persistencia en PostgreSQL. La experiencia activa es `tadeo-3situaciones-1`.
 
-## Experiencia implementada
+## Experiencia activa
 
-El recorrido contiene cinco situaciones didácticas y **21 etapas de preguntas**. Cada situación avanza de la comprensión del contexto a la representación, resolución, comprobación e interpretación de la respuesta.
+El recorrido definitivo contiene **31 pantallas**, tres situaciones didácticas y una agenda de dos actividades:
 
-| Situación | Etapas | Resultado |
+1. Ir a la papelería a comprar 5 cuadernos y un paquete de colores.
+2. Comprar un regalo para Eloísa.
+
+| Situación | Pantallas | Resultado contextual |
 |---|---:|---|
-| 1. Organizando el tiempo | 3 | 30 minutos por actividad |
-| 2. Alimentando a su mascota | 4 | 3 días; compra en el día 2 |
-| 3. En la papelería | 4 | Cuaderno de $30 |
-| 4. Registrando sus gastos | 5 | Cuatro ingresos de $120 |
-| 5. Ayudando con la cena | 5 | 4 porciones y 700 g por receta |
+| 1. Organizando el tiempo | 5–10 | 30 minutos para cada una de las dos actividades |
+| 2. En la papelería | 11–20 | Cada cuaderno cuesta $40 |
+| 3. Registrando su dinero | 21–28 | Cada cantidad recibida fue de $120 |
 
-Las respuestas incorrectas muestran pistas contextuales y permiten reintentar sin penalización. Una respuesta correcta habilita la siguiente pregunta; solamente la última etapa de cada situación permite continuar la historia y desbloquear su descubrimiento.
+Las pantallas 29–31 corresponden a agenda completada, cierre interactivo y finalización. La versión activa no incluye la situación de la mascota ni la receta.
 
-## Dev launcher
+Reglas del recorrido:
+
+- Las respuestas abiertas se guardan literalmente y no reciben calificación automática.
+- Las respuestas numéricas y de selección objetiva permiten como máximo dos intentos; el primer intento siempre se conserva.
+- Dos intentos incorrectos no bloquean permanentemente el avance.
+- Las unidades se muestran fuera de los campos numéricos.
+- La información del problema puede consultarse sin borrar respuestas.
+- Las recompensas y el indicador final representan avance o completitud, no calidad de las respuestas.
+
+Las sesiones históricas `legacy-1` y `tadeo-final-1` conservan sus catálogos, rangos y datos originales.
+
+## Desarrollo local
 
 ### Preparación inicial
-
-1. Crea el entorno e instala las dependencias:
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
-```
-
-2. Inicia PostgreSQL. El entorno de desarrollo incluido usa PostgreSQL 18 y monta el volumen en `/var/lib/postgresql`, como requiere esta versión:
-
-```bash
 docker compose up -d db
-```
-
-Si tu instalación usa el ejecutable clásico, ejecuta `docker-compose up -d db`. También puedes usar una instalación PostgreSQL existente y cambiar `DATABASE_URL`.
-
-3. Crea la configuración local y genera el hash de la contraseña administrativa:
-
-```bash
 cp .env.example .env
 .venv/bin/python -m backend.security hash-password
-```
-
-Copia el hash resultante entre comillas simples en `ADMIN_PASSWORD_HASH` y cambia `SECRET_KEY` dentro de `.env`. Las comillas evitan que la terminal interprete los signos `$` del hash Argon2.
-
-4. Aplica la migración inicial:
-
-```bash
 npm run db:migrate
 ```
 
+Configura `ADMIN_PASSWORD_HASH` y `SECRET_KEY` en `.env`. Las comillas simples alrededor del hash Argon2 evitan que la terminal interprete sus signos `$`.
+
 ### Inicio diario
 
-En macOS, haz doble clic en `dev.command`. La primera ejecución crea `.venv`, instala las dependencias, genera `.env` y solicita una contraseña para el panel administrativo. Si se usa la `DATABASE_URL` local incluida, también abre Docker Desktop cuando sea necesario, inicia PostgreSQL con Docker Compose y espera a que esté disponible. Después aplica las migraciones, inicia FastAPI y abre el navegador.
-
-Las ejecuciones posteriores reutilizan la preparación existente. Desde terminal también puedes iniciar el servidor con:
+En macOS puede usarse `dev.command`. Desde terminal:
 
 ```bash
 npm run dev
 ```
 
-El juego queda en `http://127.0.0.1:4173/`. El profesor puede entrar desde el botón **Acceso docente** del juego o directamente en `http://127.0.0.1:4173/profesor`.
+- Juego: `http://127.0.0.1:4173/`
+- Panel protegido: `http://127.0.0.1:4173/admin`
+- Revisión directa: `?situacion=1`, `?situacion=2` o `?situacion=3`
 
-## Publicación en Render
+Los modos de revisión no crean ni completan sesiones reales.
 
-El archivo `render.yaml` permite crear en una sola operación un servicio web FastAPI y una base PostgreSQL. La configuración usa inicialmente los planes gratuitos para evitar cargos durante las pruebas. Antes de una aplicación escolar real, consulta las limitaciones vigentes y cambia la base a un plan con respaldos y permanencia.
+## Persistencia y panel de investigación
 
-### 1. Prepara la contraseña docente
+- Los folios anónimos, tokens, progreso, respuestas, intentos, actividad y finalización se conservan en PostgreSQL.
+- La cola local idempotente permite recuperar envíos pendientes ante una interrupción breve de red.
+- La finalización sincroniza la cola antes de registrar `completed_at` y no duplica el evento al reintentar o recargar.
+- El panel selecciona el catálogo de campos según `experience_version`.
+- Para `tadeo-3situaciones-1`, el detalle muestra S1, S2 y S3, respuestas literales, elecciones narrativas e intentos objetivos separados y cronológicos.
+- El CSV de respuestas conserva la versión, el catálogo correspondiente y la trazabilidad de cada registro.
+- No se generan clasificaciones automáticas para respuestas abiertas.
 
-Genera el hash Argon2 en tu computadora. La contraseña no se imprime ni se sube a GitHub:
+No se requirió una migración nueva para esta versión: las tablas existentes ya admiten la nueva trayectoria mediante `experience_version`, `progress_snapshot` y los registros de respuestas.
+
+## Estructura
+
+- `index.html`, `css/main.css`, `js/app.js`: experiencia interactiva.
+- `backend/`: API, persistencia, seguridad y panel de investigación.
+- `alembic/`: migraciones históricas conservadas.
+- `tests/`: pruebas de flujo, API, panel, exportación y compatibilidad.
+- `assets/`: recursos activos e históricos; los assets antiguos no se eliminan.
+- `tadeo_videojuego/`: documentación activa.
+- `tadeo_videojuego/99 Archivo histórico/`: documentos de situaciones anteriores, excluidos del índice RAG activo.
+
+## Asistente RAG
+
+El RAG privado indexa `README.md` y la documentación Markdown activa de `tadeo_videojuego/`. La carpeta `99 Archivo histórico` se conserva, pero se excluye expresamente del descubrimiento automático para no presentar mascota o receta como parte de la experiencia vigente.
+
+Comprobación sin consumir la API:
 
 ```bash
-.venv/bin/python -m backend.security hash-password
+.venv/bin/python -m scripts.index_rag --dry-run
 ```
-
-Conserva temporalmente el resultado completo que comienza con `$argon2`; Render lo solicitará como `ADMIN_PASSWORD_HASH`.
-
-### 2. Sube esta preparación a GitHub
-
-Confirma que `render.yaml`, `.python-version` y los cambios del proyecto estén en la rama que vas a publicar. El archivo local `.env` está excluido por `.gitignore` y nunca debe agregarse al repositorio.
-
-### 3. Crea el Blueprint
-
-1. Inicia sesión en [Render](https://dashboard.render.com/) usando la cuenta que tendrá a su cargo la aplicación.
-2. Selecciona **New > Blueprint** y conecta el repositorio de GitHub.
-3. Elige la rama `main` y confirma que Render encontró `render.yaml`.
-4. Cuando Render solicite `ADMIN_PASSWORD_HASH`, pega el hash completo generado en el paso 1, no la contraseña original.
-5. Revisa los dos recursos que se crearán: `el-dia-de-tadeo` y `tadeo-postgres`. Confirma la creación.
-
-Render instalará las dependencias, aplicará las migraciones de Alembic y arrancará FastAPI. `SECRET_KEY` se genera automáticamente, la cookie docente se limita a HTTPS y la base no admite conexiones públicas externas.
-
-### 4. Comprueba la publicación
-
-Cuando el despliegue termine, Render mostrará una URL similar a:
-
-```text
-https://el-dia-de-tadeo.onrender.com
-```
-
-Comprueba las siguientes rutas:
-
-- `/health` debe responder `{"status":"ok"}`.
-- `/` abre el acceso de los estudiantes.
-- `/profesor` abre el panel protegido por la contraseña docente.
-
-En el panel crea un grupo, genera un folio de prueba y completa al menos una pregunta desde otro navegador antes de entregar los folios al grupo.
-
-### Actualizaciones posteriores
-
-Los cambios confirmados y enviados a la rama conectada se vuelven a desplegar automáticamente. El arranque ejecuta `alembic upgrade head`, por lo que también aplica cualquier migración nueva antes de aceptar tráfico.
-
-`OPENAI_API_KEY` es opcional y solo se requiere para el asistente RAG privado. Si se habilita, agrégala como variable secreta desde el panel de Render; nunca la escribas en `render.yaml` ni en GitHub.
-
-### Recorrido del profesor
-
-1. Abre **Acceso docente** e ingresa la contraseña configurada durante la instalación.
-2. Crea un grupo o periodo de aplicación.
-3. Genera la cantidad de folios necesaria. Puede copiar los disponibles, imprimirlos o descargarlos como CSV.
-4. Entrega un folio de ocho caracteres a cada estudiante para que ingrese al juego.
-5. Revisa el resumen del grupo o busca un folio para consultar sus intentos, precisión, avance y tiempos.
-6. Descarga el resumen por sesión o el historial detallado de intentos cuando necesite trabajar los datos en Excel.
-
-## Persistencia y estadísticas
-
-- El aplicador crea una aplicación o grupo desde `/admin` y genera folios anónimos de ocho caracteres.
-- Cada respuesta se valida en Python y se registra con situación, pregunta, número de intento y resultado.
-- Se miden por separado el tiempo activo de la pestaña y la duración total de la sesión.
-- Una recarga recupera la sesión del mismo navegador; volver a jugar crea una repetición sin borrar la sesión principal.
-- El panel muestra resultados individuales y agregados. Sus botones exportan un CSV de sesiones y otro de intentos.
-- Las aplicaciones se pueden eliminar con confirmación escrita. No se guardan nombres ni correos en la base analítica.
-
-PostgreSQL es la base principal. SQLite solo se usa explícitamente en las pruebas automatizadas.
-
-## Contenido
-
-- `index.html`, `css/main.css` y `js/app.js`: experiencia interactiva completa de inicio a cierre.
-- `backend/`: API, modelos, validación, métricas, seguridad y panel administrativo.
-- `alembic/`: migraciones para PostgreSQL.
-- `compose.yaml`: PostgreSQL local para desarrollo.
-- `tests/`: pruebas de validadores, sesiones, idempotencia, seguridad, métricas y exportaciones.
-- `assets/`: escenarios, personajes y objetos del paquete visual proporcionado.
-- `tadeo_videojuego/`: bóveda de Obsidian con narrativa, brief, situaciones y arquitectura.
-
-PostgreSQL conserva los resultados; `localStorage` solo mantiene el token de la sesión y las colas idempotentes necesarias para recuperarse de recargas o interrupciones breves de red.
-
-## Asistente RAG del proyecto
-
-El backend incluye un asistente privado que responde preguntas usando como fuentes el `README.md` y los documentos Markdown de `tadeo_videojuego/`. El índice se guarda localmente; la clave de OpenAI nunca se envía al navegador.
-
-1. Crea y activa un entorno virtual e instala las dependencias:
-
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
-
-2. Copia `.env.example` a `.env`, configura `OPENAI_API_KEY` y carga las variables antes de iniciar el backend:
-
-   ```bash
-   set -a
-   source .env
-   set +a
-   ```
-
-3. Genera o actualiza el índice cuando cambien los documentos:
-
-   ```bash
-   python -m scripts.index_rag
-   ```
-
-   Para comprobar qué archivos se incluirán sin consumir la API:
-
-   ```bash
-   python -m scripts.index_rag --dry-run
-   ```
-
-4. Inicia FastAPI y entra en `/admin/rag` después de autenticarte en el panel:
-
-   ```bash
-   uvicorn backend.main:app --reload --host 127.0.0.1 --port 4173
-   ```
-
-El modelo generativo, el modelo de embeddings, la ubicación del índice y el número de fragmentos recuperados se pueden cambiar con `RAG_MODEL`, `RAG_EMBEDDING_MODEL`, `RAG_INDEX_PATH` y `RAG_TOP_K`.
 
 ## Verificación técnica
-
-Para ejecutar las pruebas del backend y validar la sintaxis del frontend:
 
 ```bash
 npm test
 npm run check
+.venv/bin/python -m compileall backend scripts tests
+git diff --check
 ```
 
-La suite usa SQLite aislado para poder ejecutarse sin modificar la base PostgreSQL de desarrollo.
+La suite usa SQLite aislado y no modifica la base PostgreSQL de desarrollo. Para una base PostgreSQL desechable, el nombre debe contener `test` y puede indicarse mediante `TEST_DATABASE_URL`.
 
-Para repetir la misma suite sobre PostgreSQL, crea una base desechable cuyo nombre contenga `test` y ejecuta:
+## Publicación
 
-```bash
-TEST_DATABASE_URL=postgresql+psycopg://usuario:clave@localhost/tadeo_test npm test
-```
+`render.yaml` mantiene la configuración de FastAPI y PostgreSQL. Antes de publicar deben configurarse los secretos, aplicar las migraciones existentes y comprobar `/health`, `/`, `/admin` y una sesión ficticia completa. Este bloque no realiza deploy, push ni commit.

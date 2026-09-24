@@ -1,125 +1,56 @@
 ---
 tags:
-  - desarrollo
   - arquitectura
-  - scaffold
-estado: implementado
+  - frontend
+  - backend
+version: tadeo-3situaciones-1
 ---
 
 # Scaffold técnico
 
-[[Bienvenido|← Volver al inicio]]
+## Arquitectura conservada
 
-Documento relacionado: [[Registro de usuarios y estadísticas|Persistencia, métricas y privacidad]].
+- Frontend: `index.html`, `css/main.css` y `js/app.js`.
+- Backend: FastAPI en `backend/`.
+- Persistencia: SQLAlchemy y PostgreSQL; SQLite aislado para pruebas.
+- Migraciones históricas: Alembic, sin una migración nueva para este rediseño.
+- Panel: plantillas Jinja, autenticación docente y exportaciones CSV existentes.
 
-## Estructura web
+## Definición central del recorrido
 
-```text
-videojuego-tadeo/
-├── index.html
-├── dev.command
-├── compose.yaml
-├── requirements.txt
-├── alembic/
-├── backend/
-│   ├── main.py
-│   ├── models.py
-│   ├── validators.py
-│   └── templates/
-├── package.json
-├── css/
-│   └── main.css
-├── js/
-│   └── app.js
-├── tests/
-└── assets/
-    ├── scenes/
-    ├── characters/
-    └── objects/
-```
+`EXPERIENCE_ROUTE` define la versión, las cuatro pantallas introductorias, las tres situaciones y las pantallas de cierre. `buildExperienceFlow` calcula todos los rangos y el total; la interfaz no debe repetir un total mediante números mágicos.
 
-## Arquitectura de la experiencia
+| Segmento | Pantallas |
+|---|---:|
+| Inicio, folio, presentación, agenda inicial | 1–4 |
+| S1 · Organizando el tiempo | 5–10 |
+| S2 · En la papelería | 11–20 |
+| S3 · Registrando su dinero | 21–28 |
+| Agenda completada | 29 |
+| Cierre interactivo | 30 |
+| Finalización | 31 |
 
-```text
-Inicio
-  ↓
-Agenda inicial
-  ↓
-Situación 1 → 3 preguntas → descubrimiento: igualdad
-  ↓
-Situación 2 → 4 preguntas → completa “Alimentar al perro” → incógnita
-  ↓
-Situación 3 → 4 preguntas → completa “Papelería” → ecuación
-  ↓
-Situación 4 → 5 preguntas → completa “Regalo” → modelación Ax-B=C
-  ↓
-Situación 5 → 5 preguntas → completa “Cena” → incógnita en ambos miembros
-  ↓
-Día completado
-```
+## Estado local aislado
 
-### Cobertura de preguntas
+La versión usa claves propias:
 
-| Situación | Flujo implementado | Etapas |
-|---|---|---:|
-| 1. Organizando el tiempo | Explorar datos → repartir el tiempo → analizar la igualdad | 3 |
-| 2. Alimentando a su mascota | Identificar datos → suma repetida → representar la incógnita → actualizar agenda | 4 |
-| 3. En la papelería | Analizar la compra → construir ecuación → resolver → comprobar | 4 |
-| 4. Registrando sus gastos | Elegir y analizar → representar → interpretar términos → resolver → comprobar | 5 |
-| 5. Ayudando con la cena | Analizar → representar expresiones → comparar → resolver → comprobar y elegir | 5 |
-| **Total** | | **21** |
+- `tadeo-3situaciones-session-v1`
+- `tadeo-3situaciones-outbox-v1`
+- `tadeo-3situaciones-progress-v1`
 
-Las situaciones y sus formularios se definen en `js/app.js` mediante un arreglo `scenes`. La validación que controla el avance se ejecuta en `backend/validators.py`, de modo que el servidor sea la fuente de verdad para los resultados registrados.
+No reutiliza las claves históricas. El modo `?situacion=` acepta únicamente 1, 2 o 3, no guarda progreso real y no puede completar una sesión.
 
-### Reglas de navegación
+## Respuestas e intentos
 
-1. **Comprobar respuesta** envía el paso actual a FastAPI con un identificador idempotente.
-2. Una respuesta incorrecta conserva los campos activos y muestra una pista contextual.
-3. Una respuesta correcta desactiva los campos y habilita **Siguiente pregunta**.
-4. En la última pregunta se completa la situación, se desbloquea el descubrimiento y se habilita **Continuar**.
-5. Los botones de avance permanecen ocultos hasta que corresponda; no es posible saltar preguntas.
+- `open_text`, `math_expression` y `narrative_choice` usan `validation_result: null`.
+- `objective_numeric` y `objective_choice` registran validación y admiten hasta dos intentos.
+- Cada envío conserva valor literal, orden, pantalla, actividad, fecha del cliente y fecha del servidor.
+- El primer intento no se sustituye.
 
-## Estado, privacidad y estadísticas
+## Finalización
 
-- PostgreSQL conserva aplicaciones, folios anónimos, sesiones, intentos, respuestas y eventos de actividad.
-- El navegador guarda solamente el identificador y token de su sesión, además de colas idempotentes para recuperar envíos interrumpidos.
-- Al recargar, FastAPI devuelve la situación y pregunta vigentes. Un segundo recorrido crea una repetición y preserva la sesión principal.
-- El tiempo total se calcula entre inicio y cierre; el tiempo activo se acumula mientras la pestaña está visible.
-- La exactitud al primer intento y la exactitud global se calculan sobre las 21 preguntas. El progreso narrativo continúa expresándose en cinco situaciones.
-- No se solicitan nombres ni correos. El panel protegido permite exportar CSV o eliminar una aplicación completa.
+La pantalla 31 sincroniza primero la outbox. Después encola un solo evento de finalización con `completion_event_id`, registra `completed_at`, cambia el estado a `completed` y detiene el conteo de actividad. Una recarga recupera ese estado y un reintento reutiliza el mismo identificador.
 
-## Entorno de desarrollo
+## Compatibilidad
 
-- **Base principal:** PostgreSQL mediante `DATABASE_URL`.
-- **PostgreSQL local:** `docker compose up -d db`.
-- **Migraciones:** `npm run db:migrate`.
-- **Doble clic en macOS:** en el primer arranque, `dev.command` crea `.venv`, instala dependencias, genera `.env` y configura la contraseña administrativa. Luego abre Docker Desktop si es necesario, inicia PostgreSQL con Docker Compose, espera la conexión, aplica migraciones, inicia FastAPI y abre el navegador.
-- **Terminal:** `npm run dev` inicia FastAPI en el puerto 4173.
-- **Panel:** `/admin`, protegido por una contraseña Argon2 configurada en el entorno.
-- **Pruebas:** `npm test`; la suite usa una base SQLite aislada y no modifica PostgreSQL.
-
-## Componentes implementados
-
-- Barra superior con tiempo ficticio, agenda y descubrimientos.
-- Indicador de progreso.
-- Indicador numerado de preguntas dentro de cada situación.
-- Escenario estático y sprite por situación.
-- Flujo completo de 21 etapas con preguntas numéricas, algebraicas y de selección.
-- Formularios con validación contextual, pistas y reintentos sin penalización.
-- Navegación bloqueada hasta completar correctamente cada pregunta.
-- Agenda con cuatro estados de finalización.
-- Cinco tarjetas de descubrimiento.
-- Pantalla de cierre y reinicio.
-- Diseño responsivo y soporte de teclado.
-- Solicitud y validación de folio anónimo.
-- Persistencia central y recuperación de sesión.
-- Registro idempotente de intentos y tiempo activo.
-- Panel con resultados individuales, agregados por aplicación y exportaciones CSV.
-
-## Criterios para la siguiente iteración
-
-- Añadir diálogos por personaje antes y después de cada reto.
-- Incorporar audio, si la intervención didáctica lo requiere.
-- Incorporar campos de explicación abierta si la intervención necesita registrar las justificaciones del estudiante.
-- Definir con la investigación el periodo formal de retención y respaldo de resultados.
-- Ejecutar pruebas de carga con la cantidad real de dispositivos prevista para la aplicación.
+Los catálogos y rangos de `legacy-1` y `tadeo-final-1` permanecen separados en backend. El código histórico acoplado de sus antiguas situaciones y los assets se conservan para no destruir la posibilidad de reproducir o auditar versiones anteriores; el render activo de `tadeo-3situaciones-1` no los alcanza.

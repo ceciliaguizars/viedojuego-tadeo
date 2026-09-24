@@ -17,7 +17,7 @@
       <details class="export-menu">
         <summary class="button">Exportar resultados</summary>
         <div>
-          <a href="/admin/applications/{{ application.id }}/exports/responses-v2.csv">Respuestas · Tadeo final</a>
+          <a href="/admin/applications/{{ application.id }}/exports/responses-v2.csv">Respuestas · experiencias Tadeo</a>
           <a href="/admin/applications/{{ application.id }}/exports/sessions.csv">Sesiones · Legacy</a>
           <a href="/admin/applications/{{ application.id }}/exports/attempts.csv">Intentos · Legacy</a>
         </div>
@@ -37,16 +37,16 @@
       <div><p class="kicker">Vista rápida</p><h2 id="summary-title">Resumen del grupo</h2></div>
       <p>Las experiencias se presentan por separado para no mezclar sus métricas.</p>
     </div>
-    {% if has_final %}
-      <div class="version-summary-heading"><span class="version-label final">Tadeo final</span><p>Resumen descriptivo, sin calificación ni precisión global.</p></div>
+    {% for version_summary in research_summaries %}
+      <div class="version-summary-heading"><span class="version-label final">{{ version_summary.label }}</span><p>Resumen descriptivo, sin calificación ni precisión global.</p></div>
       <div class="stat-grid research-summary-grid">
-        <article class="stat panel"><span>Participantes</span><strong>{{ final_summary.participants }}</strong></article>
-        <article class="stat panel"><span>Sesiones</span><strong>{{ final_summary.sessions }}</strong></article>
-        <article class="stat panel"><span>Completadas</span><strong>{{ final_summary.completed }}</strong></article>
-        <article class="stat panel"><span>En progreso</span><strong>{{ final_summary.in_progress }}</strong></article>
-        <article class="stat panel"><span>Respuestas registradas</span><strong>{{ final_summary.responses }}</strong></article>
+        <article class="stat panel"><span>Participantes</span><strong>{{ version_summary.summary.participants }}</strong></article>
+        <article class="stat panel"><span>Sesiones</span><strong>{{ version_summary.summary.sessions }}</strong></article>
+        <article class="stat panel"><span>Completadas</span><strong>{{ version_summary.summary.completed }}</strong></article>
+        <article class="stat panel"><span>En progreso</span><strong>{{ version_summary.summary.in_progress }}</strong></article>
+        <article class="stat panel"><span>Respuestas registradas</span><strong>{{ version_summary.summary.responses }}</strong></article>
       </div>
-    {% endif %}
+    {% endfor %}
     {% if has_legacy %}
       <div class="version-summary-heading"><span class="version-label legacy">legacy-1</span><p>Métricas históricas exclusivas de la experiencia legacy.</p></div>
       <div class="stat-grid">
@@ -125,6 +125,7 @@
       <label for="version-filter">Versión
         <select id="version-filter" data-version-filter>
           <option value="">Todas</option>
+          <option value="tadeo-3situaciones-1">Tadeo · 3 situaciones</option>
           <option value="tadeo-final-1">Tadeo final</option>
           <option value="legacy-1">legacy-1</option>
         </select>
@@ -143,7 +144,7 @@
           <td>{{ row.session.started_at.isoformat() }}</td>
           <td>{{ row.session.completed_at.isoformat() if row.session.completed_at else '—' }}</td>
           {% if row.is_final %}
-            <td><strong>Pantalla {{ row.research.current_screen }} de 55</strong>{% if row.research.completed %}<small class="cell-note">Recorrido completado</small>{% endif %}</td>
+            <td><strong>Pantalla {{ row.research.current_screen }} de {{ row.research.total_screens }}</strong>{% if row.research.completed %}<small class="cell-note">Recorrido completado</small>{% endif %}</td>
             <td>{{ row.research.response_count }}</td>
             <td>{{ row.research.active_seconds|duration }}</td>
             <td>{{ row.research.duration_seconds|duration }}</td>
